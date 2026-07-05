@@ -1,0 +1,1755 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<script>
+  // 파일 수정 시각 기반 캐시 무효화 (로컬 데이터는 건드리지 않음)
+  fetch(location.href, {method:'HEAD', cache:'no-cache'})
+    .then(res => {
+      const lastMod = res.headers.get('last-modified') || res.headers.get('etag') || '';
+      const saved = localStorage.getItem('ot_hand_file_version');
+      if(saved && saved !== lastMod && lastMod){
+        localStorage.setItem('ot_hand_file_version', lastMod);
+        if('caches' in window) caches.keys().then(keys => keys.forEach(k => caches.delete(k)));
+        if('serviceWorker' in navigator)
+          navigator.serviceWorker.getRegistrations().then(regs => regs.forEach(r => r.unregister()));
+        window.location.reload();
+      } else {
+        if(lastMod) localStorage.setItem('ot_hand_file_version', lastMod);
+      }
+    }).catch(()=>{});
+
+  if('serviceWorker' in navigator){
+    const swCode = `
+const CACHE = 'ot-hand-eval-v1';
+const ASSETS = [location.pathname || '/'];
+self.addEventListener('install', e => {
+  e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+});
+self.addEventListener('activate', e => { e.waitUntil(clients.claim()); });
+self.addEventListener('fetch', e => {
+  if(e.request.method !== 'GET') return;
+  e.respondWith(
+    caches.match(e.request).then(cached => {
+      const net = fetch(e.request).then(res => {
+        if(res && res.status === 200){
+          const clone = res.clone();
+          caches.open(CACHE).then(c => c.put(e.request, clone));
+        }
+        return res;
+      }).catch(() => cached);
+      return cached || net;
+    })
+  );
+});
+`;
+    const blob = new Blob([swCode], {type:'application/javascript'});
+    const swUrl = URL.createObjectURL(blob);
+    navigator.serviceWorker.register(swUrl).catch(()=>{});
+  }
+</script>
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="default" />
+<meta name="apple-mobile-web-app-title" content="작업치료 평가 도구" />
+<meta name="theme-color" content="#7c3aed" />
+<title>작업치료 평가 도구 v1.0</title>
+<link rel="manifest" href="manifest.json" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  :root { color-scheme: light only; }
+  body { font-family: -apple-system, 'Apple SD Gothic Neo', 'Noto Sans KR', sans-serif; background: #f4f7fb; color: #1e293b; overscroll-behavior: none; height: 100vh; height: -webkit-fill-available; height: 100dvh; }
+  input, textarea, button, select { font-family: inherit; }
+  input[type="text"], input[type="number"], input[type="date"], textarea { font-size: 16px !important; }
+  #root { height: 100vh; height: -webkit-fill-available; height: 100dvh; display:flex; flex-direction:column; }
+
+  .topbar { position: sticky; top: 0; z-index: 100; background: #fff; border-bottom: 1.5px solid #e2e8f0; padding: 0 14px; height: 54px; display: flex; align-items: center; justify-content: space-between; box-shadow: 0 2px 8px rgba(0,0,0,0.05); flex-shrink: 0; }
+  .brand { font-weight: 800; font-size: 15px; color:#1e293b; display:flex; align-items:center; gap:8px; }
+  .brand .logo { width:26px;height:26px;border-radius:8px;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800; }
+  .icon-btn { border:none; background:transparent; color:#64748b; font-size:20px; padding:6px 8px; border-radius:8px; cursor:pointer; }
+  .icon-btn:active { background:#f1f5f9; }
+
+  .tabbar { display:flex; gap:6px; background:#fff; padding:8px 12px; border-bottom:1.5px solid #e2e8f0; flex-shrink:0; }
+  .tab-btn { flex:1; text-align:center; padding:10px 6px; border-radius:10px; border:1.5px solid #e2e8f0; background:#fff; color:#64748b; font-weight:700; font-size:13.5px; cursor:pointer; }
+  .tab-btn.on { background:#f5f3ff; border-color:#c4b5fd; color:#6d28d9; }
+
+  .scroll-area { flex:1; overflow-y:auto; -webkit-overflow-scrolling: touch; }
+  .pad { padding: 14px 14px 100px; }
+
+  .fab { position:fixed; right:18px; bottom:18px; z-index:200; background:#7c3aed; color:#fff; border:none; border-radius:999px; padding:14px 20px; font-weight:800; font-size:14px; box-shadow:0 6px 18px rgba(124,58,237,0.4); cursor:pointer; display:flex; align-items:center; gap:6px; }
+  .fab:active { transform:scale(0.97); }
+
+  .card { background:#fff; border:1.5px solid #e2e8f0; border-radius:14px; padding:14px; margin-bottom:12px; }
+  .card:active { background:#fafafe; }
+  .rec-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .rec-date { font-weight:800; font-size:15px; color:#1e293b; }
+  .rec-type { font-size:12.5px; color:#7c3aed; font-weight:700; margin-top:2px; }
+  .rec-meta { font-size:11.5px; color:#94a3b8; margin-top:8px; line-height:1.6; }
+  .rec-actions { display:flex; gap:6px; margin-top:10px; }
+  .mini-btn { border:1.5px solid #e2e8f0; background:#fff; color:#475569; font-size:12px; font-weight:700; padding:7px 10px; border-radius:8px; cursor:pointer; }
+  .mini-btn.danger { color:#dc2626; border-color:#fecaca; }
+  .mini-btn.primary { color:#6d28d9; border-color:#c4b5fd; background:#f5f3ff; }
+
+  .empty-state { text-align:center; padding:60px 20px; color:#94a3b8; }
+  .empty-state .big { font-size:40px; margin-bottom:10px; }
+
+  .section { background:#fff; border:1.5px solid #e2e8f0; border-radius:14px; margin-bottom:14px; overflow:hidden; }
+  .section-head { padding:12px 14px; background:#faf9ff; border-bottom:1.5px solid #ede9fe; font-weight:800; font-size:14px; color:#5b21b6; display:flex; align-items:center; justify-content:space-between; }
+  .section-sub { font-size:11.5px; color:#94a3b8; font-weight:500; margin-top:2px; }
+  .section-body { padding:14px; }
+
+  .field-row { margin-bottom:12px; }
+  .field-label { font-size:12.5px; font-weight:700; color:#475569; margin-bottom:6px; }
+  .field-hint { font-size:11px; color:#94a3b8; font-weight:400; margin-left:4px; }
+
+  .numwrap { position:relative; display:flex; align-items:center; }
+  .numwrap input { width:100%; border:1.5px solid #e2e8f0; border-radius:9px; padding:10px 12px; outline:none; color:#1e293b; background:#fff; text-align:right; font-size:15px; }
+  .numwrap input:focus { border-color:#a78bfa; }
+  .numwrap .suf { position:absolute; right:12px; font-size:12px; color:#94a3b8; pointer-events:none; background:#fff; padding-left:4px; }
+  .numwrap.has-suf input { padding-right:34px; }
+  .numwrap.wide input { text-align:left; }
+
+  .text-input { width:100%; border:1.5px solid #e2e8f0; border-radius:9px; padding:10px 12px; outline:none; color:#1e293b; background:#fff; font-size:15px; }
+  .text-input:focus { border-color:#a78bfa; }
+  textarea.text-input { resize:vertical; min-height:60px; }
+
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .grid3 { display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px; }
+  .grid5 { display:grid; grid-template-columns:repeat(5,1fr); gap:6px; }
+  .col-label { font-size:11px; color:#94a3b8; font-weight:700; text-align:center; margin-bottom:4px; }
+
+  table.datatable { width:100%; border-collapse:collapse; font-size:12.5px; }
+  table.datatable th, table.datatable td { border:1px solid #e2e8f0; padding:6px 4px; text-align:center; }
+  table.datatable th { background:#f8fafc; color:#475569; font-weight:700; font-size:11.5px; }
+  table.datatable td .numwrap input { padding:6px 4px; font-size:13.5px; border-radius:6px; }
+  table.datatable td.rowlabel { text-align:left; font-weight:700; color:#334155; font-size:12px; padding-left:8px; white-space:nowrap; }
+
+  .chipwrap { display:flex; flex-wrap:wrap; gap:6px; }
+  .chip { border:1.5px solid #e2e8f0; border-radius:20px; padding:7px 11px; font-size:12px; background:#fff; color:#334155; cursor:pointer; text-align:left; line-height:1.3; }
+  .chip.on { background:#7c3aed; color:#fff; border-color:#7c3aed; font-weight:700; }
+  .side-label { font-size:11.5px; font-weight:800; color:#7c3aed; margin:8px 0 5px; }
+
+  .seg-row { display:flex; gap:6px; }
+  .seg-btn { flex:1; border:1.5px solid #e2e8f0; background:#fff; color:#475569; border-radius:8px; padding:9px 0; font-weight:700; font-size:13px; cursor:pointer; }
+  .seg-btn.on { background:#7c3aed; color:#fff; border-color:#7c3aed; }
+
+  .bbs-opt { display:flex; align-items:flex-start; gap:9px; padding:9px 11px; border-radius:9px; border:1.5px solid #e2e8f0; cursor:pointer; margin-bottom:6px; background:#fff; }
+  .bbs-opt.on { border-color:#c4b5fd; background:#f5f3ff; }
+  .bbs-badge { min-width:22px; height:22px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:11.5px; flex-shrink:0; margin-top:1px; background:#fff; color:#94a3b8; border:1.5px solid #cbd5e1; }
+  .bbs-opt.on .bbs-badge { background:#7c3aed; color:#fff; border-color:#7c3aed; }
+  .bbs-opt .txt { font-size:12.5px; line-height:1.45; color:#334155; }
+
+  .item-card { border:1.5px solid #e2e8f0; border-radius:12px; padding:12px; margin-bottom:10px; }
+  .item-title { font-weight:800; font-size:13.5px; color:#1e293b; margin-bottom:8px; }
+
+  .calc-box { background:#f5f3ff; border:1.5px dashed #c4b5fd; border-radius:10px; padding:10px 12px; font-size:12.5px; color:#5b21b6; margin-top:8px; }
+  .calc-box b { font-size:15px; }
+
+  .footer-note { font-size:11px; color:#94a3b8; padding:10px 4px 30px; line-height:1.6; }
+
+  .action-bar { position:sticky; bottom:0; background:#fff; border-top:1.5px solid #e2e8f0; padding:10px 14px; display:flex; gap:8px; z-index:50; }
+  .btn { flex:1; border:none; border-radius:11px; padding:13px 0; font-weight:800; font-size:14.5px; cursor:pointer; }
+  .btn.save { background:#7c3aed; color:#fff; }
+  .btn.cancel { background:#f1f5f9; color:#475569; }
+  .btn:active { transform:scale(0.98); }
+
+  .timer-fab { position:fixed; left:18px; bottom:18px; z-index:250; }
+  .timer-btn { width:52px; height:52px; border-radius:50%; background:#1e293b; color:#fff; border:none; font-size:19px; box-shadow:0 6px 16px rgba(0,0,0,0.25); cursor:pointer; }
+  .timer-panel { position:fixed; left:18px; bottom:78px; z-index:250; background:#1e293b; color:#fff; border-radius:16px; padding:14px; width:230px; box-shadow:0 10px 30px rgba(0,0,0,0.3); }
+  .timer-time { font-size:30px; font-weight:800; text-align:center; letter-spacing:1px; font-variant-numeric:tabular-nums; margin-bottom:8px; }
+  .timer-modes { display:flex; gap:5px; margin-bottom:10px; }
+  .timer-mode-btn { flex:1; background:#334155; border:none; color:#cbd5e1; padding:6px 0; font-size:11px; border-radius:7px; cursor:pointer; }
+  .timer-mode-btn.on { background:#7c3aed; color:#fff; }
+  .timer-controls { display:flex; gap:6px; margin-bottom:8px; }
+  .timer-controls button { flex:1; border:none; border-radius:8px; padding:9px 0; font-weight:700; font-size:12.5px; cursor:pointer; }
+  .tc-start { background:#22c55e; color:#fff; }
+  .tc-stop { background:#ef4444; color:#fff; }
+  .tc-lap { background:#475569; color:#fff; }
+  .tc-reset { background:#475569; color:#fff; }
+  .lap-list { max-height:110px; overflow-y:auto; font-size:11.5px; }
+  .lap-item { display:flex; justify-content:space-between; padding:4px 2px; border-bottom:1px solid #334155; color:#cbd5e1; }
+
+  .toast { position:fixed; left:50%; bottom:30px; transform:translateX(-50%); background:#1e293b; color:#fff; padding:11px 18px; border-radius:10px; font-size:13px; z-index:400; box-shadow:0 8px 20px rgba(0,0,0,0.3); }
+
+  .modal-backdrop { position:fixed; inset:0; background:rgba(15,23,42,0.5); display:flex; align-items:center; justify-content:center; z-index:600; padding:20px; }
+  .modal-box { background:#fff; border-radius:16px; padding:20px; width:100%; max-width:320px; box-shadow:0 14px 40px rgba(0,0,0,0.3); }
+  .modal-title { font-weight:800; font-size:15.5px; color:#1e293b; margin-bottom:8px; }
+  .modal-msg { font-size:13px; color:#475569; line-height:1.5; margin-bottom:18px; }
+  .modal-actions { display:flex; gap:8px; }
+  .btn.danger { background:#ef4444; color:#fff; }
+
+  .cellwrap { display:flex; flex-direction:column; gap:4px; align-items:stretch; }
+  .cell-timer { border:1.5px solid #e2e8f0; background:#f8fafc; color:#64748b; border-radius:6px; padding:4px 2px; font-size:10.5px; font-weight:700; cursor:pointer; }
+  .cell-timer.running { background:#fee2e2; border-color:#fca5a5; color:#dc2626; }
+
+  .sel-input { width:100%; border:1.5px solid #e2e8f0; border-radius:7px; padding:6px 2px; font-size:13px; text-align:center; background:#fff; color:#1e293b; }
+  .sel-input:focus { border-color:#a78bfa; }
+
+  .manual-row { display:flex; gap:9px; padding:8px 0; border-bottom:1px solid #f1f5f9; }
+  .manual-row:last-child { border-bottom:none; }
+  .manual-badge { min-width:24px; height:24px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-weight:800; font-size:12px; color:#fff; flex-shrink:0; }
+  .manual-badge.m0 { background:#22c55e; }
+  .manual-badge.m1 { background:#84cc16; }
+  .manual-badge.m2 { background:#f59e0b; }
+  .manual-badge.m3 { background:#ef4444; }
+  .manual-title { font-weight:800; font-size:12.5px; color:#1e293b; margin-bottom:2px; }
+  .manual-desc { font-size:12px; color:#475569; line-height:1.5; }
+  .manual-pos { border:1.5px solid #e2e8f0; border-radius:10px; padding:9px 11px; margin-bottom:8px; }
+  .manual-pos-title { font-weight:800; font-size:12.5px; color:#7c3aed; margin-bottom:3px; }
+  .manual-list { font-size:12px; color:#475569; line-height:1.7; padding-left:16px; margin:0; }
+  .manual-sub { font-weight:800; font-size:12.5px; color:#334155; margin:10px 0 4px; }
+
+  .inline-timer-btn { border:1.5px solid #c4b5fd; background:#f5f3ff; color:#6d28d9; font-weight:800; font-size:13px; padding:10px 16px; border-radius:10px; cursor:pointer; }
+  .inline-timer-btn.running { background:#fee2e2; border-color:#fca5a5; color:#dc2626; }
+  .inline-timer-display { font-weight:800; font-size:19px; color:#1e293b; font-variant-numeric:tabular-nums; letter-spacing:0.5px; }
+
+  .btn:disabled { opacity:0.45; pointer-events:none; }
+
+  .picker-overlay { position:fixed; inset:0; z-index:550; background:#f4f7fb; display:flex; flex-direction:column; height:100vh; height:100dvh; }
+
+  .tap-box { height:230px; border-radius:22px; background:#f5f3ff; border:2.5px solid #c4b5fd; display:flex; flex-direction:column; align-items:center; justify-content:center; -webkit-user-select:none; user-select:none; touch-action:manipulation; cursor:pointer; }
+  .tap-box.active { background:#ede9fe; border-color:#7c3aed; }
+  .tap-box:active { background:#ddd6fe; }
+  .tap-count { font-size:68px; font-weight:900; color:#5b21b6; font-variant-numeric:tabular-nums; line-height:1; }
+  .tap-hint { margin-top:10px; font-size:13px; color:#7c3aed; font-weight:700; text-align:center; padding:0 18px; }
+  .tap-save-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+
+  @media (min-width: 720px) {
+    .pad { max-width:640px; margin:0 auto; padding:18px 18px 100px; }
+    .action-bar { max-width:640px; margin:0 auto; }
+  }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef } = React;
+
+/* ---------------- 데이터 정의 ---------------- */
+
+const EDINBURGH_ITEMS = ["글씨를 쓴다", "공을 던진다", "칫솔을 쥔다", "숟가락을 든다"];
+const EDINBURGH_OPTS = [
+  [100, "항상 오른손"], [50, "대부분 오른손"], [0, "양손 같이"], [-50, "대부분 왼손"], [-100, "항상 왼손"]
+];
+
+const JEBSEN_ITEMS = [
+  "짧은 문장 쓰기", "카드 뒤집기", "작은 물건 깡통에 넣기", "먹는 흉내내기",
+  "장기말 쌓기", "크고 가벼운 깡통 옮기기", "크고 무거운 깡통 옮기기"
+];
+
+const PURDUE_ROWS = [
+  { key:"right", label:"Right Hand (30초)" },
+  { key:"left", label:"Left Hand (30초)" },
+  { key:"both", label:"Both Hand (30초)" },
+  { key:"rlb", label:"R + L + B" },
+  { key:"assembly", label:"Assembly (1분)" },
+];
+
+const MFT_RAW_ITEMS = [
+  { key:"shoulderFlex", label:"어깨 굽힘 (Shoulder Flexion)",
+    opts:[[1,"45도 미만"],[2,"45-90도"],[3,"90-135도"],[4,"135도 이상"]] },
+  { key:"shoulderAbd", label:"어깨 벌림 (Shoulder Abduction)",
+    opts:[[1,"45도 미만"],[2,"45-90도"],[3,"90-135도"],[4,"135도 이상"]] },
+  { key:"handToOcciput", label:"손을 후두부에",
+    opts:[[1,"조금 움직임"],[2,"손이 흉부 위까지"],[3,"손이 후두부에 닿음"],[4,"손바닥이 완전히 닿음"]] },
+  { key:"handToBack", label:"손을 등에",
+    opts:[[1,"조금 움직임"],[2,"동측 둔부에 닿음"],[3,"손가락, 손등이 척추에"],[4,"손바닥이 완전히 닿음"]] },
+  { key:"grasp", label:"Grasp",
+    opts:[[1,"Ball을 잡고 있음"],[2,"Ball을 놓을 수 있음"],[3,"Ball을 집어 올림"]] },
+  { key:"pinchGrasp", label:"Pinch grasp",
+    opts:[[1,"연필을 집어올림"],[2,"동전을 집어올림"],[3,"바늘을 집어올림"]] },
+  { key:"cubeTransfer", label:"입방체의 운반",
+    opts:[[1,"5초 이내에 1-2개"],[2,"5초 이내에 3-4개"],[3,"5초 이내에 5-6개"],[4,"5초 이내에 7-8개"]] },
+  { key:"pegboardMft", label:"Peg board",
+    opts:[[1,"30초 이내에 1-3개"],[2,"30초 이내에 4-6개"],[3,"30초 이내에 7-9개"],[4,"30초 이내에 10-12개"],[5,"30초 이내에 13-15개"],[6,"30초 이내에 16개 이상"]] },
+];
+
+const TOUCH_FILAMENTS = [2.83, 3.61, 4.31, 4.56, 6.65];
+const TWO_POINT_OPTS = Array.from({length:15}, (_,i)=>i+1); // 1~15mm
+
+const STORAGE_KEY = "ot_hand_mft_eval_v1";
+
+/* ---------------- 저장 / 로드 ---------------- */
+
+function loadDB(){
+  try {
+    const r = localStorage.getItem(STORAGE_KEY);
+    if(r){
+      const d = JSON.parse(r);
+      if(d.custom){
+        return { custom: d.custom||[], presets: d.presets||[] };
+      }
+      // 이전 버전(탭 고정형) 데이터 마이그레이션 — 기록이 사라지지 않도록 모듈 목록을 붙여서 이관
+      const OLD_HF_MODULES = ["jebsen","handpower","mftraw","oconnor","boxblock","edinburgh","fingertap","thumbloc"];
+      const OLD_MFT_MODULES = ["edinburgh","mftraw","fingertap","boxblock","thumbloc","oconnor","handpower","dash","sensibility","purdue"];
+      const custom = [];
+      (d.hf||[]).forEach(rec=> custom.push({...rec, modules: OLD_HF_MODULES}));
+      (d.mft||[]).forEach(rec=> custom.push({...rec, modules: OLD_MFT_MODULES}));
+      return { custom, presets: [] };
+    }
+  } catch(e){}
+  return { custom:[], presets:[] };
+}
+function saveDB(db){
+  try {
+    const payload = JSON.stringify(db);
+    localStorage.setItem(STORAGE_KEY, payload);
+    localStorage.setItem(STORAGE_KEY+"_backup", payload);
+    localStorage.setItem(STORAGE_KEY+"_backup_time", new Date().toISOString());
+  } catch(e){}
+}
+
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function fmtDT(ts){
+  if(!ts) return "";
+  const d = new Date(ts);
+  return d.toLocaleDateString("ko-KR",{year:"2-digit",month:"2-digit",day:"2-digit"}) + " " +
+         d.toLocaleTimeString("ko-KR",{hour:"2-digit",minute:"2-digit"});
+}
+function num(v){ const n = parseFloat(v); return isNaN(n) ? null : n; }
+
+/* ---------------- 기본 데이터 ---------------- */
+
+function emptyShared(){
+  return {
+    date:"", evalType:"", note:"",
+    dash:{ disability:"", work:"", sports:"" },
+    sens:{
+      touch:{ rt:["","","","",""], lt:["","","","",""] },
+      twoPoint:{ rt:["","","","",""], lt:["","","","",""] },
+    },
+    grip:{
+      grasp:{ rt:"", lt:"" },
+      gripLateral:{ rt:"", lt:"" },
+      gripTip:{ rt:"", lt:"" },
+      gripThreeJaw:{ rt:"", lt:"" },
+      gripLb:{ rt:"", lt:"" },
+    },
+    purdue: PURDUE_ROWS.reduce((a,r)=>{ a[r.key]={t1:"",t2:"",t3:""}; return a; },{}),
+    jebsen: JEBSEN_ITEMS.map(()=>({ dom:"", nondom:"" })),
+    edin: EDINBURGH_ITEMS.map(()=>null),
+    tap: { dom:"", rows:[{rt:"",lt:""},{rt:"",lt:""},{rt:"",lt:""}] },
+    raw: MFT_RAW_ITEMS.map(()=>({ rt:null, lt:null })),
+    boxblock:{ rt:"", lt:"" },
+    thumbLoc:{ impairedSide:"", p1:null, p2:null, p3:null },
+    oconnor:{
+      gender:"",
+      rt:{ firstMin:"", firstSec:"", secondMin:"", secondSec:"" },
+      lt:{ firstMin:"", firstSec:"", secondMin:"", secondSec:"" },
+    },
+  };
+}
+
+/* 저장된 예전 데이터에 새 필드가 없어도 안전하게 기본값과 병합 */
+function deepMerge(def, data){
+  if(Array.isArray(def)){
+    if(!Array.isArray(data)) return def;
+    return def.map((defItem,i)=> data[i]!==undefined ? deepMerge(defItem, data[i]) : defItem);
+  }
+  if(def && typeof def === "object"){
+    if(!data || typeof data !== "object") return def;
+    const out = {};
+    Object.keys(def).forEach(k=>{ out[k] = deepMerge(def[k], data[k]); });
+    return out;
+  }
+  return (data===undefined || data===null) ? def : data;
+}
+
+/* ---------------- 공통 계산 ---------------- */
+
+function edinCalc(edin){
+  const filled = edin.filter(v=>v!==null && v!==undefined);
+  if(filled.length===0) return { sum:null, lq:null, cat:"" };
+  const sum = filled.reduce((a,b)=>a+b,0);
+  const lq = sum/4;
+  let cat = "";
+  if(lq<=-61) cat="왼손 우세";
+  else if(lq>=61) cat="오른손 우세";
+  else cat="양손 우세";
+  return { sum, lq, cat };
+}
+function tapAvg(rows, side){
+  const vals = rows.map(r=>num(r[side])).filter(v=>v!==null);
+  if(vals.length===0) return "";
+  return (vals.reduce((a,b)=>a+b,0)/vals.length).toFixed(1);
+}
+/* O'Connor: Minute+Second를 합산해 초로 환산 후 raw score 계산 */
+function oconnorTotalSec(min, sec){
+  const m = num(min), s = num(sec);
+  if(m===null && s===null) return null;
+  return (m||0)*60 + (s||0);
+}
+function oconnorRaw(side){
+  const first = oconnorTotalSec(side.firstMin, side.firstSec);
+  const second = oconnorTotalSec(side.secondMin, side.secondSec);
+  if(first===null && second===null) return null;
+  return ((first||0) + 1.1*(second||0)) / 2;
+}
+/* O'Connor Finger Dexterity Test 규준표 (Raw score가 낮을수록=빠를수록 %tile 높음)
+   출처: 병원 제공 규준표. 엑셀 원본과 동일하게 raw score가 표의 기준값 이하가 되는 첫 구간의 %tile을 사용합니다(계단식 매칭, 보간 없음). */
+const OCONNOR_NORMS = {
+  male: [
+    {raw:183, pct:99.86}, {raw:194, pct:99.4}, {raw:207, pct:97.7}, {raw:221, pct:93.3},
+    {raw:238, pct:84.1}, {raw:257, pct:69.1}, {raw:280, pct:50}, {raw:307, pct:30.9},
+    {raw:340, pct:15.9}, {raw:382, pct:6.7}, {raw:434, pct:2.3}, {raw:503, pct:0.6}, {raw:598, pct:0.14},
+  ],
+  female: [
+    {raw:166, pct:99.86}, {raw:175, pct:99.4}, {raw:186, pct:97.7}, {raw:197, pct:93.3},
+    {raw:211, pct:84.1}, {raw:226, pct:69.1}, {raw:244, pct:50}, {raw:265, pct:30.9},
+    {raw:290, pct:15.9}, {raw:319, pct:6.7}, {raw:356, pct:2.3}, {raw:402, pct:0.6}, {raw:462, pct:0.14},
+  ],
+};
+function oconnorPercentile(raw, gender){
+  if(raw===null || !gender) return null;
+  const table = OCONNOR_NORMS[gender]; // raw 오름차순
+  if(!table || table.length===0) return null;
+  for(const row of table){
+    if(raw <= row.raw) return row.pct;
+  }
+  return table[table.length-1].pct; // 표의 최대 raw score를 초과하면 가장 낮은 %tile
+}
+function fmtPct(pct){
+  if(pct===null || pct===undefined) return "-";
+  return (Math.round(pct*100)/100).toString();
+}
+
+/* ---------------- 공통 입력 컴포넌트 ---------------- */
+
+function NumInput({ value, onChange, decimal=true, suffix, placeholder, align }){
+  return (
+    <div className={"numwrap"+(suffix?" has-suf":"")+(align==="left"?" wide":"")}>
+      <input
+        type="text"
+        inputMode={decimal?"decimal":"numeric"}
+        value={value||""}
+        placeholder={placeholder||""}
+        onChange={e=>{
+          let v = e.target.value;
+          v = decimal ? v.replace(/[^0-9.\-]/g,"") : v.replace(/[^0-9\-]/g,"");
+          onChange(v);
+        }}
+        onFocus={e=>e.target.select()}
+      />
+      {suffix && <span className="suf">{suffix}</span>}
+    </div>
+  );
+}
+
+function TextInput({ value, onChange, placeholder, area }){
+  const Tag = area ? "textarea" : "input";
+  return (
+    <Tag
+      className="text-input"
+      type={area?undefined:"text"}
+      value={value||""}
+      placeholder={placeholder||""}
+      onChange={e=>onChange(e.target.value)}
+    />
+  );
+}
+
+function Field({ label, hint, children }){
+  return (
+    <div className="field-row">
+      {label && <div className="field-label">{label}{hint && <span className="field-hint">{hint}</span>}</div>}
+      {children}
+    </div>
+  );
+}
+
+function Section({ title, sub, children, right }){
+  return (
+    <div className="section">
+      <div className="section-head">
+        <div>
+          <div>{title}</div>
+          {sub && <div className="section-sub">{sub}</div>}
+        </div>
+        {right}
+      </div>
+      <div className="section-body">{children}</div>
+    </div>
+  );
+}
+
+function ChipPick({ options, value, onChange }){
+  return (
+    <div className="chipwrap">
+      {options.map(([v,label])=>(
+        <button type="button" key={v} className={"chip"+(value===v?" on":"")} onClick={()=>onChange(v)}>
+          {v}) {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function SelectPick({ options, value, onChange, unit }){
+  return (
+    <select className="sel-input" value={value||""} onChange={e=>onChange(e.target.value)}>
+      <option value="">-</option>
+      {options.map(o=>(
+        <option key={o} value={o}>{o}{unit||""}</option>
+      ))}
+    </select>
+  );
+}
+
+function ConfirmModal({ title, message, confirmText, cancelText, danger, onCancel, onConfirm }){
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">{title || "확인"}</div>
+        <div className="modal-msg">{message}</div>
+        <div className="modal-actions">
+          <button className="btn cancel" onClick={onCancel}>{cancelText || "취소"}</button>
+          <button className={"btn "+(danger===false?"save":"danger")} onClick={onConfirm}>{confirmText || "삭제"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* 여러 타이머 컴포넌트가 공유하는 알림음 */
+let _sharedAudioCtx = null;
+function playBeep(){
+  try{
+    if(!_sharedAudioCtx) _sharedAudioCtx = new (window.AudioContext||window.webkitAudioContext)();
+    const ctx = _sharedAudioCtx;
+    const o = ctx.createOscillator(); const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    o.frequency.value = 880; g.gain.value = 0.15;
+    o.start(); o.stop(ctx.currentTime+0.35);
+    if(navigator.vibrate) navigator.vibrate(200);
+  }catch(e){}
+}
+
+/* 표 안의 셀에서 바로 초 단위 시간을 재고, 정지하면 해당 값이 자동 입력됨 */
+function CellTimer({ onResult }){
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(0);
+  const intervalRef = useRef(null);
+
+  useEffect(()=>{
+    if(running){
+      startRef.current = Date.now() - elapsed;
+      intervalRef.current = setInterval(()=>{ setElapsed(Date.now() - startRef.current); }, 100);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return ()=>clearInterval(intervalRef.current);
+  }, [running]);
+
+  const toggle = (e)=>{
+    e.stopPropagation();
+    if(running){
+      setRunning(false);
+      onResult((elapsed/1000).toFixed(1));
+      setElapsed(0);
+    } else {
+      setElapsed(0);
+      setRunning(true);
+    }
+  };
+
+  return (
+    <button type="button" className={"cell-timer"+(running?" running":"")} onClick={toggle}>
+      {running ? (elapsed/1000).toFixed(1)+"초 ■" : "⏱ 측정"}
+    </button>
+  );
+}
+
+function SegPick({ options, value, onChange }){
+  return (
+    <div className="seg-row">
+      {options.map(o=>(
+        <button type="button" key={o} className={"seg-btn"+(value===o?" on":"")} onClick={()=>onChange(o)}>{o}</button>
+      ))}
+    </div>
+  );
+}
+
+/* Rt/Lt 두 값 입력을 나란히 */
+function RtLtRow({ label, rt, lt, onRt, onLt, decimal=true, suffix, placeholder }){
+  return (
+    <Field label={label}>
+      <div className="grid2">
+        <div>
+          <div className="col-label">Rt.</div>
+          <NumInput value={rt} onChange={onRt} decimal={decimal} suffix={suffix} placeholder={placeholder} />
+        </div>
+        <div>
+          <div className="col-label">Lt.</div>
+          <NumInput value={lt} onChange={onLt} decimal={decimal} suffix={suffix} placeholder={placeholder} />
+        </div>
+      </div>
+    </Field>
+  );
+}
+
+/* ---------------- Edinburgh 공용 블록 ---------------- */
+
+function EdinburghBlock({ edin, setEdin, title }){
+  const { sum, lq, cat } = edinCalc(edin);
+  return (
+    <Section title={title || "Edinburgh Handedness Inventory"} sub="손잡이(우세손) 검사">
+      {EDINBURGH_ITEMS.map((label, i)=>(
+        <div className="item-card" key={i}>
+          <div className="item-title">{i+1}. {label}</div>
+          <div>
+            {EDINBURGH_OPTS.map(([v, optLabel])=>(
+              <div key={v}
+                className={"bbs-opt"+(edin[i]===v?" on":"")}
+                onClick={()=>{ const next=edin.slice(); next[i]=v; setEdin(next); }}>
+                <div className="bbs-badge">{v}</div>
+                <div className="txt">{optLabel} ({v>0?"+":""}{v}점)</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div className="calc-box">
+        합계: <b>{sum===null?"-":sum}</b>점 &nbsp;|&nbsp;
+        L.Q (합계 ÷ 4): <b>{lq===null?"-":lq.toFixed(1)}</b> &nbsp;|&nbsp;
+        판정: <b>{cat||"-"}</b>
+        <div style={{marginTop:6, fontSize:11, color:"#7c3aed"}}>
+          왼손우세 LQ -100~-61 · 양손우세 LQ -60~60 · 오른손우세 LQ 61~100
+        </div>
+      </div>
+    </Section>
+  );
+}
+
+/* ---------------- Finger Tapping 공용 블록 ---------------- */
+
+/* 환자가 직접 화면을 탭해서 태핑 횟수를 재는 도구. 저장 위치는 부모(FingerTapBlock)가 미리 정해두고,
+   측정이 끝나면(시간 종료 또는 수동 정지) onFinish(count)를 한 번 호출한다. */
+function TapTestTool({ onFinish, seconds=10 }){
+  const [count, setCount] = useState(0);
+  const [running, setRunning] = useState(false);
+  const [remainMs, setRemainMs] = useState(seconds*1000);
+  const countRef = useRef(0);
+  const startRef = useRef(0);
+  const intervalRef = useRef(null);
+  const onFinishRef = useRef(onFinish);
+  onFinishRef.current = onFinish;
+
+  useEffect(()=>{
+    if(running){
+      startRef.current = Date.now();
+      intervalRef.current = setInterval(()=>{
+        const left = seconds*1000 - (Date.now()-startRef.current);
+        if(left<=0){
+          setRemainMs(0);
+          setRunning(false);
+          playBeep();
+          clearInterval(intervalRef.current);
+          onFinishRef.current(countRef.current);
+        } else {
+          setRemainMs(left);
+        }
+      }, 100);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return ()=>clearInterval(intervalRef.current);
+  }, [running]);
+
+  const start = ()=>{
+    countRef.current = 0;
+    setCount(0);
+    setRemainMs(seconds*1000);
+    setRunning(true);
+  };
+  const stop = ()=>{
+    setRunning(false);
+    onFinishRef.current(countRef.current);
+  };
+  const reset = ()=>{
+    setRunning(false);
+    countRef.current = 0;
+    setCount(0);
+    setRemainMs(seconds*1000);
+  };
+  const tap = (e)=>{
+    e.preventDefault();
+    if(!running) return;
+    countRef.current += 1;
+    setCount(countRef.current);
+  };
+
+  return (
+    <div style={{marginBottom:16}}>
+      <div
+        className={"tap-box"+(running?" active":"")}
+        onClick={tap}
+      >
+        <div className="tap-count">{count}</div>
+        <div className="tap-hint">
+          {running ? `남은 시간 ${(remainMs/1000).toFixed(1)}초 — 계속 탭하세요!` : `시작 버튼을 누른 뒤 이 박스를 ${seconds}초 동안 탭하세요`}
+        </div>
+      </div>
+      <div style={{display:"flex", gap:8, marginTop:10}}>
+        {!running
+          ? <button type="button" className="inline-timer-btn" onClick={start}>▶ {seconds}초 시작</button>
+          : <button type="button" className="inline-timer-btn running" onClick={stop}>■ 정지 (기록)</button>}
+        <button type="button" className="mini-btn" onClick={reset}>초기화</button>
+      </div>
+    </div>
+  );
+}
+
+function FingerTapBlock({ tap, setTap, title }){
+  const [selSide, setSelSide] = useState("Rt");
+  const [selTrial, setSelTrial] = useState(1);
+  const [pendingSave, setPendingSave] = useState(null); // {side, idx, count, existing}
+
+  const setRow = (i, side, val)=>{
+    const rows = tap.rows.map((r,idx)=> idx===i ? {...r,[side]:val} : r);
+    setTap({...tap, rows});
+  };
+
+  const handleFinish = (count)=>{
+    const side = selSide.toLowerCase();
+    const idx = selTrial - 1;
+    const existing = tap.rows[idx][side];
+    if(existing !== "" && existing !== null && existing !== undefined){
+      setPendingSave({ side, idx, count, existing });
+    } else {
+      setRow(idx, side, String(count));
+    }
+  };
+
+  return (
+    <Section title={title || "Finger Tapping Test"} sub="10초간 태핑 횟수 (dominant hand 표시)">
+      <Field label="Dominant hand">
+        <SegPick options={["Rt","Lt"]} value={tap.dom} onChange={v=>setTap({...tap, dom:v})} />
+      </Field>
+
+      <div className="side-label">태핑 테스트 도구</div>
+      <Field label="저장할 칸" hint="측정을 시작하기 전에 먼저 골라두세요">
+        <div className="grid2">
+          <div>
+            <div className="col-label">쪽</div>
+            <SegPick options={["Rt","Lt"]} value={selSide} onChange={setSelSide} />
+          </div>
+          <div>
+            <div className="col-label">시행</div>
+            <SegPick options={[1,2,3]} value={selTrial} onChange={setSelTrial} />
+          </div>
+        </div>
+      </Field>
+      <TapTestTool seconds={10} onFinish={handleFinish} />
+
+      <table className="datatable">
+        <thead><tr><th></th><th>Rt.</th><th>Lt.</th></tr></thead>
+        <tbody>
+          {[0,1,2].map(i=>(
+            <tr key={i}>
+              <td className="rowlabel">{i+1}회</td>
+              <td><NumInput value={tap.rows[i].rt} onChange={v=>setRow(i,"rt",v)} decimal={false} /></td>
+              <td><NumInput value={tap.rows[i].lt} onChange={v=>setRow(i,"lt",v)} decimal={false} /></td>
+            </tr>
+          ))}
+          <tr>
+            <td className="rowlabel">평균</td>
+            <td style={{fontWeight:800,color:"#7c3aed"}}>{tapAvg(tap.rows,"rt")||"-"}</td>
+            <td style={{fontWeight:800,color:"#7c3aed"}}>{tapAvg(tap.rows,"lt")||"-"}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      {pendingSave && (
+        <ConfirmModal
+          title="기존 값 변경"
+          message={`${pendingSave.side==="rt"?"Rt":"Lt"} ${pendingSave.idx+1}회 칸에 이미 ${pendingSave.existing}회가 입력되어 있습니다. ${pendingSave.count}회로 바꾸시겠습니까?`}
+          confirmText="바꾸기"
+          cancelText="취소"
+          onCancel={()=>setPendingSave(null)}
+          onConfirm={()=>{ setRow(pendingSave.idx, pendingSave.side, String(pendingSave.count)); setPendingSave(null); }}
+        />
+      )}
+    </Section>
+  );
+}
+
+/* ---------------- MFT 원본 세부항목 / O'Connor / Box&Block / Thumb Localization 공용 블록 ---------------- */
+
+function MftRawBlock({ raw, setRaw, title }){
+  return (
+    <Section title={title || "Manual Function Test (MFT)"} sub="어깨/손 동작 원본 세부항목 — Rt · Lt 각각 해당 단계 선택">
+      {MFT_RAW_ITEMS.map((item,i)=>(
+        <div className="item-card" key={item.key}>
+          <div className="item-title">{i+1}. {item.label}</div>
+          <div className="side-label">Rt.</div>
+          <ChipPick options={item.opts} value={raw[i].rt} onChange={v=>setRaw(i,"rt",v)} />
+          <div className="side-label">Lt.</div>
+          <ChipPick options={item.opts} value={raw[i].lt} onChange={v=>setRaw(i,"lt",v)} />
+        </div>
+      ))}
+    </Section>
+  );
+}
+
+/* 누르면 자동으로 60초를 카운트다운하는 타이머 (Box & Block Test용) */
+/* 누르면 자동으로 지정한 초를 카운트다운하는 타이머 (Purdue Pegboard, Box & Block 등에서 재사용) */
+function CountdownTimer({ seconds, label }){
+  const totalMs = seconds*1000;
+  const [running, setRunning] = useState(false);
+  const [remain, setRemain] = useState(totalMs);
+  const startRef = useRef(0);
+  const intervalRef = useRef(null);
+
+  useEffect(()=>{
+    if(running){
+      startRef.current = Date.now();
+      intervalRef.current = setInterval(()=>{
+        const left = totalMs - (Date.now() - startRef.current);
+        if(left<=0){
+          setRemain(0);
+          setRunning(false);
+          playBeep();
+          clearInterval(intervalRef.current);
+        } else {
+          setRemain(left);
+        }
+      }, 100);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return ()=>clearInterval(intervalRef.current);
+  }, [running]);
+
+  const toggle = ()=>{
+    if(running){
+      setRunning(false);
+    } else {
+      setRemain(totalMs);
+      setRunning(true);
+    }
+  };
+
+  const fmt = (ms)=>{
+    const s = Math.max(0, Math.ceil(ms/1000));
+    const mm = Math.floor(s/60), ss = s%60;
+    return (mm<10?"0"+mm:mm)+":"+(ss<10?"0"+ss:ss);
+  };
+
+  return (
+    <div style={{display:"flex", alignItems:"center", gap:12, marginBottom:10}}>
+      <button type="button" className={"inline-timer-btn"+(running?" running":"")} onClick={toggle}>
+        {running ? "■ 정지" : (label || `▶ ${seconds}초 타이머 시작`)}
+      </button>
+      <div className="inline-timer-display">{fmt(remain)}</div>
+    </div>
+  );
+}
+
+function BoxBlockBlock({ data, onChange, title }){
+  return (
+    <Section title={title || "Box & Block Test"} sub="버튼을 누르면 60초 카운트다운이 자동 시작되고, 종료 시 알림음이 울립니다">
+      <CountdownTimer seconds={60} label="▶ 1분 타이머 시작" />
+      <RtLtRow label="개수" rt={data.rt} lt={data.lt}
+        onRt={v=>onChange({...data, rt:v})} onLt={v=>onChange({...data, lt:v})} decimal={false} suffix="개" />
+    </Section>
+  );
+}
+
+function ThumbLocBlock({ data, onChange, title }){
+  const setImpaired = (side)=> onChange({...data, impairedSide: data.impairedSide===side ? "" : side});
+  const setPos = (key, val)=> onChange({...data, [key]: val});
+  return (
+    <Section title={title || "Thumb Localization Test"} sub="Impaired side 체크 후, Position 1~3을 0~3점 4점 척도로 채점">
+      <Field label="Impaired side">
+        <div className="grid2">
+          <div className={"bbs-opt"+(data.impairedSide==="Rt"?" on":"")} onClick={()=>setImpaired("Rt")}>
+            <div className="bbs-badge">{data.impairedSide==="Rt"?"✓":""}</div>
+            <div className="txt">Rt (Right)</div>
+          </div>
+          <div className={"bbs-opt"+(data.impairedSide==="Lt"?" on":"")} onClick={()=>setImpaired("Lt")}>
+            <div className="bbs-badge">{data.impairedSide==="Lt"?"✓":""}</div>
+            <div className="txt">Lt (Left)</div>
+          </div>
+        </div>
+      </Field>
+      {[["p1","Position 1"],["p2","Position 2"],["p3","Position 3"]].map(([key,label])=>(
+        <Field label={label} key={key}>
+          <SegPick options={[0,1,2,3]} value={data[key]} onChange={v=>setPos(key,v)} />
+        </Field>
+      ))}
+    </Section>
+  );
+}
+
+function OconnorBlock({ data, onChange, title }){
+  const setField = (side, key, val)=> onChange({...data, [side]:{...data[side], [key]:val}});
+  const genderKey = data.gender ? data.gender.toLowerCase() : "";
+  const rawRt = oconnorRaw(data.rt);
+  const rawLt = oconnorRaw(data.lt);
+  const pctRt = rawRt===null ? null : oconnorPercentile(rawRt, genderKey);
+  const pctLt = rawLt===null ? null : oconnorPercentile(rawLt, genderKey);
+
+  return (
+    <Section title={title || "O'Connor Finger Dexterity Test"} sub="Raw score = {First half + (1.1 × Second half)} ÷ 2 (초 환산)">
+      <Field label="성별" hint="규준표(Male/Female)가 다르게 적용됩니다">
+        <SegPick options={["Male","Female"]} value={data.gender} onChange={v=>onChange({...data, gender:v})} />
+      </Field>
+      <table className="datatable">
+        <thead>
+          <tr><th></th><th>Min</th><th>Sec</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td colSpan="3" style={{background:"#f8fafc", fontWeight:800, textAlign:"left", color:"#7c3aed", fontSize:12}}>First half</td>
+          </tr>
+          <tr>
+            <td className="rowlabel">Rt.</td>
+            <td><NumInput value={data.rt.firstMin} onChange={v=>setField("rt","firstMin",v)} decimal={false} /></td>
+            <td><NumInput value={data.rt.firstSec} onChange={v=>setField("rt","firstSec",v)} /></td>
+          </tr>
+          <tr>
+            <td className="rowlabel">Lt.</td>
+            <td><NumInput value={data.lt.firstMin} onChange={v=>setField("lt","firstMin",v)} decimal={false} /></td>
+            <td><NumInput value={data.lt.firstSec} onChange={v=>setField("lt","firstSec",v)} /></td>
+          </tr>
+          <tr>
+            <td colSpan="3" style={{background:"#f8fafc", fontWeight:800, textAlign:"left", color:"#7c3aed", fontSize:12}}>Second half</td>
+          </tr>
+          <tr>
+            <td className="rowlabel">Rt.</td>
+            <td><NumInput value={data.rt.secondMin} onChange={v=>setField("rt","secondMin",v)} decimal={false} /></td>
+            <td><NumInput value={data.rt.secondSec} onChange={v=>setField("rt","secondSec",v)} /></td>
+          </tr>
+          <tr>
+            <td className="rowlabel">Lt.</td>
+            <td><NumInput value={data.lt.secondMin} onChange={v=>setField("lt","secondMin",v)} decimal={false} /></td>
+            <td><NumInput value={data.lt.secondSec} onChange={v=>setField("lt","secondSec",v)} /></td>
+          </tr>
+        </tbody>
+      </table>
+
+      <div className="side-label" style={{marginTop:14}}>결과</div>
+      <table className="datatable">
+        <thead>
+          <tr><th></th><th>Raw score</th><th>%tile rank</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td className="rowlabel">Rt.</td>
+            <td style={{fontWeight:800,color:"#7c3aed"}}>{rawRt===null?"-":rawRt.toFixed(2)}</td>
+            <td style={{fontWeight:700,color:"#7c3aed"}}>{fmtPct(pctRt)}</td>
+          </tr>
+          <tr>
+            <td className="rowlabel">Lt.</td>
+            <td style={{fontWeight:800,color:"#7c3aed"}}>{rawLt===null?"-":rawLt.toFixed(2)}</td>
+            <td style={{fontWeight:700,color:"#7c3aed"}}>{fmtPct(pctLt)}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div className="footer-note" style={{padding:"6px 2px 0"}}>Min/Sec = 분/초. Raw score는 First half·Second half를 초로 환산해 자동 계산되며, %tile rank는 병원 규준표(Men/Women, 13개 구간)에서 raw score 이하인 첫 구간 값을 그대로 사용합니다(엑셀 원본과 동일한 계단식 매칭).</div>
+    </Section>
+  );
+}
+
+function TLTManualCard(){
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="section">
+      <div className="section-head" style={{cursor:"pointer"}} onClick={()=>setOpen(o=>!o)}>
+        <div>
+          <div>📖 TLT 평가 매뉴얼</div>
+          <div className="section-sub">채점 기준 · 검사 자세 · 임상 해석 — 탭하여 {open?"접기":"펼치기"}</div>
+        </div>
+        <div style={{fontSize:16,color:"#7c3aed",fontWeight:800}}>{open?"▲":"▼"}</div>
+      </div>
+      {open && (
+        <div className="section-body">
+          <div className="manual-desc" style={{marginBottom:10}}>
+            시각 단서 없이 자신의 신체 위치를 인식하는 능력을 확인하므로, 뇌졸중·말초신경병증·감각 저하가 의심되는 환자의 감각-운동 통합 기능을 파악하는 데 유용합니다.
+          </div>
+
+          <div className="manual-sub">■ 채점 기준 (0–3점)</div>
+          <div className="manual-row">
+            <div className="manual-badge m0">0</div>
+            <div>
+              <div className="manual-title">정상 (Normal)</div>
+              <div className="manual-desc">닿는 손이 곧고 빠르게 고정된 엄지 끝을 향해 이동하여 쉽게 잡음.</div>
+            </div>
+          </div>
+          <div className="manual-row">
+            <div className="manual-badge m1">1</div>
+            <div>
+              <div className="manual-title">경도 손상 (Slightly)</div>
+              <div className="manual-desc">손가락이 엄지에서 수 cm 벗어났다가 즉시 교정되거나, 이동 중 손이 흔들림.</div>
+            </div>
+          </div>
+          <div className="manual-row">
+            <div className="manual-badge m2">2</div>
+            <div>
+              <div className="manual-title">중등도 손상 (Moderately)</div>
+              <div className="manual-desc">닿는 손이 엄지 주위를 수 cm 이상 탐색하다 우연히 닿거나, 고정된 손·다른 손가락을 따라 더듬어 엄지 끝에 도달.</div>
+            </div>
+          </div>
+          <div className="manual-row">
+            <div className="manual-badge m3">3</div>
+            <div>
+              <div className="manual-title">중증 손상 (Severely)</div>
+              <div className="manual-desc">고정된 팔에 전혀 도달하지 못하거나, 우연히 팔에 닿은 뒤 피부를 따라 더듬어 엄지 끝에 도달.</div>
+            </div>
+          </div>
+
+          <div className="manual-sub">■ 세 가지 검사 자세</div>
+          <div className="manual-pos">
+            <div className="manual-pos-title">Position 1 — 기본</div>
+            <div className="manual-desc">팔꿈치 90° 굴곡, 어깨 0° 굴곡. 가장 기본적인 자세로 근위부 감각을 확인.</div>
+          </div>
+          <div className="manual-pos">
+            <div className="manual-pos-title">Position 2 — 어깨 굴곡</div>
+            <div className="manual-desc">팔꿈치 90° 굴곡, 어깨를 입 높이까지 굴곡. 공간상 위치가 바뀐 조건에서 재확인.</div>
+          </div>
+          <div className="manual-pos">
+            <div className="manual-pos-title">Position 3 — 정중선 교차</div>
+            <div className="manual-desc">팔꿈치 90° 굴곡, 어깨를 내회전하여 몸통 정중선을 넘김. 난이도가 가장 높은 조건.</div>
+          </div>
+
+          <div className="calc-box" style={{marginTop:4}}>
+            <b style={{fontSize:12.5}}>⚠ 시행 시 유의사항</b>
+            <ul className="manual-list" style={{marginTop:6}}>
+              <li>반드시 환자가 눈을 감았는지 확인 후 시행합니다(시각 보상 차단).</li>
+              <li>세 자세(Position 1–3)를 각각 시행하며, 자세마다 별도로 채점합니다.</li>
+              <li>판정 불가 시 U/C(Unable to Check)로 기록하고 사유를 남깁니다.</li>
+              <li>좌·우 상지를 구분하여 평가·기록합니다.</li>
+            </ul>
+          </div>
+
+          <div className="manual-sub">📋 임상적으로 읽는 법</div>
+          <ul className="manual-list">
+            <li><b>자세 간 편차</b>를 보세요. Position 1은 정상인데 2·3에서 손상이 나타나면, 복잡한 공간 조건에서 위치 감각 통합이 약해지는 것입니다.</li>
+            <li><b>탐색 방식</b>이 중요합니다. 곧장 접근(0)과 더듬어 찾기(2–3)는 감각 손상 수준이 질적으로 다릅니다.</li>
+            <li><b>피부를 따라가는 보상(3점)</b>은 촉각으로 고유수용감각 결손을 메우는 전략으로, 심부감각 손상이 심함을 시사합니다.</li>
+            <li>좌우 <b>비대칭</b>은 편측 병변(예: 뇌졸중 반대측)을 시사할 수 있어 함께 기록합니다.</li>
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 개별 평가 항목 블록 (모듈형 폼에서 재사용) ---------------- */
+
+function JebsenBlock({ jebsen, setJebsen, title }){
+  const setField = (i, key, val)=>{
+    const arr = jebsen.map((r,idx)=> idx===i ? {...r,[key]:val} : r);
+    setJebsen(arr);
+  };
+  return (
+    <Section title={title || "Jebsen-Taylor Hand Function Test"} sub="⏱ 측정 버튼으로 시작, 다시 누르면 정지와 동시에 초가 자동 입력됩니다">
+      <table className="datatable">
+        <thead><tr><th style={{textAlign:"left"}}>Item</th><th>Dominant<br/>hand (초)</th><th>Non-dominant<br/>hand (초)</th></tr></thead>
+        <tbody>
+          {JEBSEN_ITEMS.map((label,i)=>(
+            <tr key={i}>
+              <td className="rowlabel">{i+1}. {label}</td>
+              <td>
+                <div className="cellwrap">
+                  <NumInput value={jebsen[i].dom} onChange={v=>setField(i,"dom",v)} />
+                  <CellTimer onResult={v=>setField(i,"dom",v)} />
+                </div>
+              </td>
+              <td>
+                <div className="cellwrap">
+                  <NumInput value={jebsen[i].nondom} onChange={v=>setField(i,"nondom",v)} />
+                  <CellTimer onResult={v=>setField(i,"nondom",v)} />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </Section>
+  );
+}
+
+function HandPowerBlock({ grip, setPath, title }){
+  return (
+    <Section title={title || "Hand power measurement"}>
+      <RtLtRow label="Grasp power" rt={grip.grasp.rt} lt={grip.grasp.lt}
+        onRt={v=>setPath(["grip","grasp","rt"],v)} onLt={v=>setPath(["grip","grasp","lt"],v)} suffix="kg" />
+      <div className="side-label">Grip power (lb)</div>
+      <RtLtRow label="lateral pinch" rt={grip.gripLateral.rt} lt={grip.gripLateral.lt}
+        onRt={v=>setPath(["grip","gripLateral","rt"],v)} onLt={v=>setPath(["grip","gripLateral","lt"],v)} suffix="lb" />
+      <RtLtRow label="tip pinch" rt={grip.gripTip.rt} lt={grip.gripTip.lt}
+        onRt={v=>setPath(["grip","gripTip","rt"],v)} onLt={v=>setPath(["grip","gripTip","lt"],v)} suffix="lb" />
+      <RtLtRow label="3 jaw chuck" rt={grip.gripThreeJaw.rt} lt={grip.gripThreeJaw.lt}
+        onRt={v=>setPath(["grip","gripThreeJaw","rt"],v)} onLt={v=>setPath(["grip","gripThreeJaw","lt"],v)} suffix="lb" />
+    </Section>
+  );
+}
+
+function DashBlock({ dash, setPath, title }){
+  return (
+    <Section title={title || "DASH"} sub="score = {(sum of n responses / n) − 1} × 25">
+      <Field label="Disability / Symptom Score">
+        <NumInput value={dash.disability} onChange={v=>setPath(["dash","disability"],v)} suffix="/100" />
+      </Field>
+      <Field label="Work Module Score">
+        <NumInput value={dash.work} onChange={v=>setPath(["dash","work"],v)} suffix="/100" />
+      </Field>
+      <Field label="Sports Module Score">
+        <NumInput value={dash.sports} onChange={v=>setPath(["dash","sports"],v)} suffix="/100" />
+      </Field>
+    </Section>
+  );
+}
+
+function SensibilityBlock({ sens, setPath, title }){
+  return (
+    <Section title={title || "Sensibility"}>
+      <div style={{marginBottom:14}}>
+        <div className="side-label">Touch threshold (Semmes-Weinstein monofilament, g)</div>
+        <table className="datatable">
+          <thead><tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
+          <tbody>
+            {["rt","lt"].map(side=>(
+              <tr key={side}>
+                <td className="rowlabel">{side==="rt"?"Rt.":"Lt."}</td>
+                {[0,1,2,3,4].map(i=>(
+                  <td key={i}>
+                    <SelectPick
+                      options={TOUCH_FILAMENTS}
+                      value={sens.touch[side][i]}
+                      onChange={v=>{
+                        const arr = sens.touch[side].slice(); arr[i]=v;
+                        setPath(["sens","touch",side], arr);
+                      }}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div style={{marginBottom:14}}>
+        <div className="side-label">Two-point discrimination (mm)</div>
+        <table className="datatable">
+          <thead><tr><th></th><th>1</th><th>2</th><th>3</th><th>4</th><th>5</th></tr></thead>
+          <tbody>
+            {["rt","lt"].map(side=>(
+              <tr key={side}>
+                <td className="rowlabel">{side==="rt"?"Rt.":"Lt."}</td>
+                {[0,1,2,3,4].map(i=>(
+                  <td key={i}>
+                    <SelectPick
+                      options={TWO_POINT_OPTS}
+                      unit="mm"
+                      value={sens.twoPoint[side][i]}
+                      onChange={v=>{
+                        const arr = sens.twoPoint[side].slice(); arr[i]=v;
+                        setPath(["sens","twoPoint",side], arr);
+                      }}
+                    />
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
+function PurdueBlock({ purdue, setPath, title }){
+  const rlbSum = (t)=>{
+    const vals = [purdue.right[t], purdue.left[t], purdue.both[t]];
+    const hasAny = vals.some(v=>v!=="" && v!==null && v!==undefined);
+    if(!hasAny) return "-";
+    return vals.reduce((a,v)=> a + (num(v)||0), 0);
+  };
+  return (
+    <Section title={title || "Purdue Pegboard Test"} sub="Right/Left/Both는 30초, Assembly는 1분 타이머로 시간을 재고 완료된 개수를 입력하세요">
+      <CountdownTimer seconds={30} label="▶ 30초 타이머 시작 (Right / Left / Both)" />
+      <table className="datatable">
+        <thead><tr><th style={{textAlign:"left"}}>항목</th><th>1st</th><th>2nd</th><th>3rd</th></tr></thead>
+        <tbody>
+          {["right","left","both"].map(key=>{
+            const row = PURDUE_ROWS.find(r=>r.key===key);
+            return (
+              <tr key={key}>
+                <td className="rowlabel">{row.label}</td>
+                {["t1","t2","t3"].map(t=>(
+                  <td key={t}>
+                    <NumInput value={purdue[key][t]} onChange={v=>setPath(["purdue",key,t],v)} decimal={false} />
+                  </td>
+                ))}
+              </tr>
+            );
+          })}
+          <tr>
+            <td className="rowlabel">R + L + B</td>
+            {["t1","t2","t3"].map(t=>(
+              <td key={t} style={{fontWeight:800,color:"#7c3aed"}}>{rlbSum(t)}</td>
+            ))}
+          </tr>
+        </tbody>
+      </table>
+
+      <div style={{marginTop:16}}>
+        <CountdownTimer seconds={60} label="▶ 1분 타이머 시작 (Assembly)" />
+        <table className="datatable">
+          <thead><tr><th style={{textAlign:"left"}}>항목</th><th>1st</th><th>2nd</th><th>3rd</th></tr></thead>
+          <tbody>
+            <tr>
+              <td className="rowlabel">Assembly (1분)</td>
+              {["t1","t2","t3"].map(t=>(
+                <td key={t}>
+                  <NumInput value={purdue.assembly[t]} onChange={v=>setPath(["purdue","assembly",t],v)} decimal={false} />
+                </td>
+              ))}
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  );
+}
+
+/* ---------------- 평가 항목(모듈) 정의 ---------------- */
+/* 하나의 항목 = "평가 시작하기"에서 체크할 수 있는 단위. render()는 공유 데이터(d)와 헬퍼를 받아 섹션을 그린다. */
+
+const MODULE_DEFS = [
+  { key:"jebsen", label:"Jebsen-Taylor Hand Function Test",
+    render:(d,h)=> <JebsenBlock jebsen={d.jebsen} setJebsen={v=>h.setD({...d,jebsen:v})} /> },
+  { key:"handpower", label:"Hand power measurement",
+    render:(d,h)=> <HandPowerBlock grip={d.grip} setPath={h.setPath} /> },
+  { key:"mftraw", label:"Manual Function Test (MFT) 세부항목",
+    render:(d,h)=> <MftRawBlock raw={d.raw} setRaw={h.setRaw} title="Manual Function Test (MFT)" /> },
+  { key:"oconnor", label:"O'Connor Finger Dexterity Test",
+    render:(d,h)=> <OconnorBlock data={d.oconnor} onChange={v=>h.setD({...d,oconnor:v})} /> },
+  { key:"boxblock", label:"Box and Block Test",
+    render:(d,h)=> <BoxBlockBlock data={d.boxblock} onChange={v=>h.setD({...d,boxblock:v})} /> },
+  { key:"edinburgh", label:"Edinburgh Handedness Inventory - short form",
+    render:(d,h)=> <EdinburghBlock edin={d.edin} setEdin={v=>h.setD({...d,edin:v})} title="Edinburgh Handedness Inventory — short form" /> },
+  { key:"fingertap", label:"Finger Tapping Test",
+    render:(d,h)=> <FingerTapBlock tap={d.tap} setTap={v=>h.setD({...d,tap:v})} /> },
+  { key:"thumbloc", label:"Thumb Localization Test",
+    render:(d,h)=> (
+      <React.Fragment>
+        <ThumbLocBlock data={d.thumbLoc} onChange={v=>h.setD({...d,thumbLoc:v})} />
+        <TLTManualCard />
+      </React.Fragment>
+    ) },
+  { key:"dash", label:"DASH",
+    render:(d,h)=> <DashBlock dash={d.dash} setPath={h.setPath} /> },
+  { key:"sensibility", label:"Sensibility Test (Touch threshold / Two-point discrimination)",
+    render:(d,h)=> <SensibilityBlock sens={d.sens} setPath={h.setPath} /> },
+  { key:"purdue", label:"Purdue Pegboard Test",
+    render:(d,h)=> <PurdueBlock purdue={d.purdue} setPath={h.setPath} /> },
+];
+
+/* ---------------- 맞춤 평가 폼 (선택된 항목만 표시) ---------------- */
+
+function FormCustom({ initial, modules, onSave, onCancel, isEdit, onRequestDelete, onEditModules }){
+  const [d, setD] = useState(initial);
+
+  const setPath = (path, val)=>{
+    setD(prev=>{
+      const next = JSON.parse(JSON.stringify(prev));
+      let cur = next;
+      for(let i=0;i<path.length-1;i++) cur = cur[path[i]];
+      cur[path[path.length-1]] = val;
+      return next;
+    });
+  };
+  const setRaw = (i, side, val)=>{
+    const raw = d.raw.map((r,idx)=> idx===i ? {...r,[side]:val} : r);
+    setD({...d, raw});
+  };
+  const helpers = { setD, setPath, setRaw };
+
+  return (
+    <React.Fragment>
+      <div className="scroll-area">
+        <div className="pad">
+
+          <Section title="기본 정보" right={<button className="mini-btn" onClick={onEditModules}>항목 변경</button>}>
+            <Field label="검사일">
+              <input type="date" className="text-input" value={d.date} onChange={e=>setD({...d,date:e.target.value})} />
+            </Field>
+            <Field label="평가 종류" hint="예: 초기평가 / 재평가">
+              <TextInput value={d.evalType} onChange={v=>setD({...d,evalType:v})} placeholder="초기평가 / 재평가 등" />
+            </Field>
+          </Section>
+
+          {modules.length===0 && (
+            <div className="empty-state">
+              <div className="big">🗒️</div>
+              <div style={{fontWeight:700, marginBottom:4}}>선택된 평가 항목이 없습니다</div>
+              <div style={{fontSize:12.5}}>위 "항목 변경" 버튼으로 포함할 항목을 선택하세요</div>
+            </div>
+          )}
+
+          {modules.map(key=>{
+            const def = MODULE_DEFS.find(m=>m.key===key);
+            if(!def) return null;
+            return <React.Fragment key={key}>{def.render(d, helpers)}</React.Fragment>;
+          })}
+
+          <Section title="비고">
+            <TextInput area value={d.note} onChange={v=>setD({...d,note:v})} placeholder="특이사항 (선택)" />
+          </Section>
+
+          <div className="footer-note">작성자(작업치료사) 서명란은 EMR 시스템에서 별도 처리하세요. 이 앱에는 환자 개인정보를 입력하지 않습니다.</div>
+        </div>
+      </div>
+      <div className="action-bar">
+        {isEdit && <button className="btn danger" onClick={onRequestDelete} style={{flex:"0 0 74px"}}>삭제</button>}
+        <button className="btn cancel" onClick={onCancel}>취소</button>
+        <button className="btn save" onClick={()=>onSave(d)}>저장</button>
+      </div>
+    </React.Fragment>
+  );
+}
+
+/* ---------------- 이름 입력 모달 (세트 저장용) ---------------- */
+
+function PromptModal({ title, placeholder, onCancel, onConfirm }){
+  const [val, setVal] = useState("");
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">{title || "이름 입력"}</div>
+        <input
+          className="text-input" style={{marginBottom:16}} autoFocus
+          value={val} placeholder={placeholder||""}
+          onChange={e=>setVal(e.target.value)}
+        />
+        <div className="modal-actions">
+          <button className="btn cancel" onClick={onCancel}>취소</button>
+          <button className="btn save" onClick={()=>{ if(val.trim()) onConfirm(val.trim()); }}>저장</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 평가 항목 선택 모달 ("평가 시작하기" / "항목 변경") ---------------- */
+
+function ModulePickerModal({ initialModules, presets, onStart, onSavePreset, onDeletePreset, onClose }){
+  const [selected, setSelected] = useState(initialModules || []);
+  const [showNameModal, setShowNameModal] = useState(false);
+
+  const toggle = (key)=> setSelected(s=> s.includes(key) ? s.filter(k=>k!==key) : [...s, key]);
+  const toggleAll = ()=> setSelected(selected.length===MODULE_DEFS.length ? [] : MODULE_DEFS.map(m=>m.key));
+
+  return (
+    <div className="picker-overlay">
+      <div className="topbar">
+        <div className="brand">평가 항목 선택</div>
+        <button className="icon-btn" onClick={onClose}>✕</button>
+      </div>
+      <div className="scroll-area">
+        <div className="pad">
+          {presets.length>0 && (
+            <Section title="저장된 세트" sub="눌러서 바로 적용">
+              <div className="chipwrap">
+                {presets.map(p=>(
+                  <div key={p.id} style={{display:"flex", alignItems:"center", gap:4}}>
+                    <button type="button" className="chip" onClick={()=>setSelected(p.modules)}>
+                      {p.name} ({p.modules.length})
+                    </button>
+                    <button type="button" className="mini-btn danger" style={{padding:"5px 8px", fontSize:10.5}}
+                      onClick={()=>onDeletePreset(p.id)}>삭제</button>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
+          <Section
+            title="평가 항목 선택"
+            sub={`${selected.length} / ${MODULE_DEFS.length}개 선택됨`}
+            right={<button className="mini-btn" onClick={toggleAll}>{selected.length===MODULE_DEFS.length?"전체 해제":"전체 선택"}</button>}
+          >
+            {MODULE_DEFS.map(m=>(
+              <div key={m.key}
+                className={"bbs-opt"+(selected.includes(m.key)?" on":"")}
+                onClick={()=>toggle(m.key)}>
+                <div className="bbs-badge">{selected.includes(m.key)?"✓":""}</div>
+                <div className="txt">{m.label}</div>
+              </div>
+            ))}
+          </Section>
+        </div>
+      </div>
+      <div className="action-bar">
+        <button className="btn cancel" style={{flex:"0 0 64px"}} onClick={onClose}>닫기</button>
+        <button className="btn cancel" disabled={selected.length===0} onClick={()=>setShowNameModal(true)}>세트로 저장</button>
+        <button className="btn save" disabled={selected.length===0} onClick={()=>onStart(selected)}>시작하기</button>
+      </div>
+      {showNameModal && (
+        <PromptModal
+          title="세트 이름"
+          placeholder="예: 손기능 기본세트"
+          onCancel={()=>setShowNameModal(false)}
+          onConfirm={(name)=>{ onSavePreset(name, selected); setShowNameModal(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ---------------- 요약 텍스트 (복사용) ---------------- */
+
+const MODULE_SUMMARY = {
+  jebsen: d => `- Jebsen-Taylor 항목1(짧은 문장쓰기) Dom/Non-dom: ${d.jebsen[0].dom||"-"} / ${d.jebsen[0].nondom||"-"}초`,
+  handpower: d => `- Hand power - Grasp(kg) Rt/Lt: ${d.grip.grasp.rt||"-"} / ${d.grip.grasp.lt||"-"}`,
+  mftraw: d => `- MFT 세부항목 응답: ${d.raw.filter(r=>r.rt!==null||r.lt!==null).length}/${MFT_RAW_ITEMS.length}개`,
+  oconnor: d => {
+    const r1 = oconnorRaw(d.oconnor.rt), r2 = oconnorRaw(d.oconnor.lt);
+    return `- O'Connor Raw score Rt/Lt: ${r1===null?"-":r1.toFixed(2)} / ${r2===null?"-":r2.toFixed(2)}`;
+  },
+  boxblock: d => `- Box&Block Rt/Lt: ${d.boxblock.rt||"-"} / ${d.boxblock.lt||"-"}`,
+  edinburgh: d => { const e=edinCalc(d.edin); return `- Edinburgh LQ: ${e.lq===null?"-":e.lq.toFixed(1)} (${e.cat||"-"})`; },
+  fingertap: d => `- Finger Tapping 평균 Rt/Lt: ${tapAvg(d.tap.rows,"rt")||"-"} / ${tapAvg(d.tap.rows,"lt")||"-"}`,
+  thumbloc: d => `- Thumb Localization Impaired side: ${d.thumbLoc.impairedSide||"-"} / P1,P2,P3: ${[d.thumbLoc.p1,d.thumbLoc.p2,d.thumbLoc.p3].map(v=>v===null||v===undefined?"-":v).join(", ")}`,
+  dash: d => `- DASH Disability/Work/Sports: ${d.dash.disability||"-"} / ${d.dash.work||"-"} / ${d.dash.sports||"-"}`,
+  sensibility: d => `- Sensibility 입력됨`,
+  purdue: d => `- Purdue Pegboard R/L/Both(1st): ${d.purdue.right.t1||"-"} / ${d.purdue.left.t1||"-"} / ${d.purdue.both.t1||"-"}`,
+};
+
+function buildSummary(rec){
+  const d = rec.data;
+  let s = `[맞춤 평가] ${d.date||"날짜 미입력"} ${d.evalType?("("+d.evalType+")"):""}\n`;
+  (rec.modules||[]).forEach(key=>{
+    if(MODULE_SUMMARY[key]) s += MODULE_SUMMARY[key](d) + "\n";
+  });
+  if(d.note) s += `- 비고: ${d.note}\n`;
+  s += `(최초작성 ${fmtDT(rec.createdAt)} / 최종수정 ${fmtDT(rec.updatedAt)})`;
+  return s;
+}
+
+function copyText(text, onDone){
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(()=>onDone(true)).catch(()=>onDone(false));
+  } else {
+    try{
+      const ta=document.createElement("textarea"); ta.value=text; document.body.appendChild(ta);
+      ta.select(); document.execCommand("copy"); document.body.removeChild(ta); onDone(true);
+    }catch(e){ onDone(false); }
+  }
+}
+
+/* ---------------- 목록 화면 ---------------- */
+
+function ListView({ records, onEdit, onRequestDelete, toast }){
+  const sorted = records.slice().sort((a,b)=>b.updatedAt-a.updatedAt);
+
+  if(sorted.length===0){
+    return (
+      <div className="scroll-area">
+        <div className="pad">
+          <div className="empty-state">
+            <div className="big">📋</div>
+            <div style={{fontWeight:700, marginBottom:4}}>저장된 평가 기록이 없습니다</div>
+            <div style={{fontSize:12.5}}>오른쪽 아래 "평가 시작하기" 버튼으로 새 평가를 시작하세요</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scroll-area">
+      <div className="pad">
+        {sorted.map(rec=>{
+          const modLabels = (rec.modules||[]).map(k=>{
+            const def = MODULE_DEFS.find(m=>m.key===k);
+            return def ? def.label : k;
+          });
+          return (
+            <div className="card" key={rec.id}>
+              <div onClick={()=>onEdit(rec.id)}>
+                <div className="rec-top">
+                  <div>
+                    <div className="rec-date">{rec.data.date || "날짜 미입력"}</div>
+                    {rec.data.evalType && <div className="rec-type">{rec.data.evalType}</div>}
+                  </div>
+                </div>
+                <div className="rec-meta">
+                  포함 항목({modLabels.length}): {modLabels.slice(0,3).join(", ")}{modLabels.length>3?` 외 ${modLabels.length-3}개`:""}<br/>
+                  최초작성 {fmtDT(rec.createdAt)}<br/>
+                  최종수정 {fmtDT(rec.updatedAt)}
+                </div>
+              </div>
+              <div className="rec-actions">
+                <button className="mini-btn primary" onClick={()=>onEdit(rec.id)}>보기/수정</button>
+                <button className="mini-btn" onClick={()=>{
+                  copyText(buildSummary(rec), ok=>toast(ok?"결과를 복사했습니다":"복사에 실패했습니다"));
+                }}>결과 복사</button>
+                <button className="mini-btn danger" onClick={()=>onRequestDelete(rec.id)}>삭제</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ---------------- 플로팅 타이머 ---------------- */
+
+function FloatingTimer(){
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState("stopwatch"); // stopwatch | 30 | 60
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0); // ms, counts up for stopwatch, counts down for presets
+  const [laps, setLaps] = useState([]);
+  const intervalRef = useRef(null);
+  const startBaseRef = useRef(0);
+  const startTsRef = useRef(0);
+
+  const beep = playBeep;
+
+  const totalMs = mode==="30" ? 30000 : mode==="60" ? 60000 : null;
+
+  useEffect(()=>{
+    if(running){
+      startTsRef.current = Date.now();
+      intervalRef.current = setInterval(()=>{
+        const now = Date.now();
+        let val = startBaseRef.current + (now - startTsRef.current);
+        if(totalMs!==null){
+          const remain = totalMs - val;
+          if(remain<=0){
+            setElapsed(0);
+            setRunning(false);
+            beep();
+            clearInterval(intervalRef.current);
+            return;
+          }
+          setElapsed(remain);
+        } else {
+          setElapsed(val);
+        }
+      }, 100);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return ()=>clearInterval(intervalRef.current);
+  }, [running, mode]);
+
+  const fmt = (ms)=>{
+    const s = Math.max(0, ms/1000);
+    const mm = Math.floor(s/60);
+    const ss = (s%60).toFixed(1);
+    return (mm<10?"0"+mm:mm)+":"+(parseFloat(ss)<10?"0"+ss:ss);
+  };
+
+  const start = ()=>{
+    startBaseRef.current = mode==="stopwatch" ? elapsed : (totalMs - elapsed);
+    setRunning(true);
+  };
+  const stop = ()=>setRunning(false);
+  const reset = ()=>{
+    setRunning(false);
+    setElapsed(mode==="stopwatch" ? 0 : (totalMs||0));
+    setLaps([]);
+  };
+  const lap = ()=>{
+    setLaps(prev=>[{n:prev.length+1, t: mode==="stopwatch"?elapsed:(totalMs-elapsed)}, ...prev]);
+  };
+  const switchMode = (m)=>{
+    setRunning(false);
+    setMode(m);
+    setElapsed(m==="stopwatch" ? 0 : (m==="30"?30000:60000));
+    setLaps([]);
+  };
+
+  return (
+    <React.Fragment>
+      {open && (
+        <div className="timer-panel">
+          <div className="timer-modes">
+            <button className={"timer-mode-btn"+(mode==="stopwatch"?" on":"")} onClick={()=>switchMode("stopwatch")}>스톱워치</button>
+            <button className={"timer-mode-btn"+(mode==="30"?" on":"")} onClick={()=>switchMode("30")}>30초</button>
+            <button className={"timer-mode-btn"+(mode==="60"?" on":"")} onClick={()=>switchMode("60")}>60초</button>
+          </div>
+          <div className="timer-time">{fmt(elapsed)}</div>
+          <div className="timer-controls">
+            {!running
+              ? <button className="tc-start" onClick={start}>시작</button>
+              : <button className="tc-stop" onClick={stop}>정지</button>}
+            <button className="tc-lap" onClick={lap}>기록</button>
+            <button className="tc-reset" onClick={reset}>초기화</button>
+          </div>
+          {laps.length>0 && (
+            <div className="lap-list">
+              {laps.map(l=>(
+                <div className="lap-item" key={l.n}><span>#{l.n}</span><span>{fmt(l.t)}</span></div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <div className="timer-fab">
+        <button className="timer-btn" onClick={()=>setOpen(o=>!o)}>⏱</button>
+      </div>
+    </React.Fragment>
+  );
+}
+
+/* ---------------- 최상위 App ---------------- */
+
+function App(){
+  const [db, setDb] = useState(loadDB);
+  const [screen, setScreen] = useState("list"); // list | form
+  const [editingId, setEditingId] = useState(null);
+  const [currentModules, setCurrentModules] = useState([]);
+  const [toastMsg, setToastMsg] = useState("");
+  const [confirmState, setConfirmState] = useState(null); // { message, onConfirm }
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerMode, setPickerMode] = useState("new"); // new | adjust
+  const [pickerInitial, setPickerInitial] = useState([]);
+
+  useEffect(()=>{ saveDB(db); }, [db]);
+
+  const toast = (msg)=>{
+    setToastMsg(msg);
+    setTimeout(()=>setToastMsg(""), 1800);
+  };
+
+  const records = db.custom;
+
+  const openPickerForNew = ()=>{ setPickerInitial([]); setPickerMode("new"); setPickerOpen(true); };
+  const openPickerForAdjust = ()=>{ setPickerInitial(currentModules); setPickerMode("adjust"); setPickerOpen(true); };
+
+  const handlePickerStart = (selected)=>{
+    if(pickerMode==="new"){
+      setCurrentModules(selected);
+      setEditingId(null);
+      setScreen("form");
+    } else {
+      setCurrentModules(selected);
+    }
+    setPickerOpen(false);
+  };
+
+  const handleSavePreset = (name, modules)=>{
+    const preset = { id: uid(), name, modules, createdAt: Date.now() };
+    setDb(prev=>({...prev, presets:[...prev.presets, preset]}));
+    toast("세트가 저장되었습니다");
+  };
+  const handleDeletePreset = (id)=>{
+    setDb(prev=>({...prev, presets: prev.presets.filter(p=>p.id!==id)}));
+  };
+
+  const openEdit = (id)=>{
+    const rec = records.find(r=>r.id===id);
+    if(!rec) return;
+    setEditingId(id);
+    setCurrentModules(rec.modules||[]);
+    setScreen("form");
+  };
+  const cancelForm = ()=>{ setScreen("list"); setEditingId(null); };
+
+  const doDelete = (id)=>{
+    setDb(prev=>({...prev, custom: prev.custom.filter(r=>r.id!==id)}));
+    toast("삭제되었습니다");
+  };
+
+  const requestDeleteFromList = (id)=>{
+    setConfirmState({
+      message: "이 기록을 삭제하시겠습니까? 삭제하면 되돌릴 수 없습니다.",
+      onConfirm: ()=>{ doDelete(id); setConfirmState(null); }
+    });
+  };
+  const requestDeleteFromForm = ()=>{
+    setConfirmState({
+      message: "이 기록을 삭제하시겠습니까? 삭제하면 되돌릴 수 없습니다.",
+      onConfirm: ()=>{ doDelete(editingId); setConfirmState(null); setScreen("list"); setEditingId(null); }
+    });
+  };
+
+  const onSave = (data)=>{
+    setDb(prev=>{
+      const now = Date.now();
+      if(editingId){
+        const updated = prev.custom.map(r=> r.id===editingId ? {...r, data, modules: currentModules, updatedAt: now} : r);
+        return {...prev, custom: updated};
+      } else {
+        const rec = { id: uid(), createdAt: now, updatedAt: now, modules: currentModules, data };
+        return {...prev, custom: [rec, ...prev.custom]};
+      }
+    });
+    toast("저장되었습니다");
+    setScreen("list"); setEditingId(null);
+  };
+
+  const editingRecord = editingId ? records.find(r=>r.id===editingId) : null;
+  const formInitial = editingRecord ? deepMerge(emptyShared(), editingRecord.data) : emptyShared();
+
+  return (
+    <React.Fragment>
+      <div className="topbar">
+        <div className="brand"><div className="logo">✋</div>작업치료 평가 도구</div>
+        {screen==="form" && <button className="icon-btn" onClick={cancelForm}>✕</button>}
+      </div>
+
+      {screen==="list" ? (
+        <React.Fragment>
+          <ListView records={records} onEdit={openEdit} onRequestDelete={requestDeleteFromList} toast={toast} />
+          <button className="fab" onClick={openPickerForNew}>＋ 평가 시작하기</button>
+        </React.Fragment>
+      ) : (
+        <FormCustom
+          key={editingId || "new"}
+          initial={formInitial}
+          modules={currentModules}
+          onSave={onSave}
+          onCancel={cancelForm}
+          isEdit={!!editingId}
+          onRequestDelete={requestDeleteFromForm}
+          onEditModules={openPickerForAdjust}
+        />
+      )}
+
+      <FloatingTimer />
+
+      {toastMsg && <div className="toast">{toastMsg}</div>}
+
+      {confirmState && (
+        <ConfirmModal
+          title="기록 삭제"
+          message={confirmState.message}
+          confirmText="삭제"
+          cancelText="취소"
+          onCancel={()=>setConfirmState(null)}
+          onConfirm={confirmState.onConfirm}
+        />
+      )}
+
+      {pickerOpen && (
+        <ModulePickerModal
+          initialModules={pickerInitial}
+          presets={db.presets}
+          onStart={handlePickerStart}
+          onSavePreset={handleSavePreset}
+          onDeletePreset={handleDeletePreset}
+          onClose={()=>setPickerOpen(false)}
+        />
+      )}
+    </React.Fragment>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
