@@ -220,6 +220,28 @@ self.addEventListener('fetch', e => {
   .tap-hint { margin-top:10px; font-size:13px; color:#7c3aed; font-weight:700; text-align:center; padding:0 18px; }
   .tap-save-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 
+  .module-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+  .module-card { border:2px solid #e2e8f0; border-radius:12px; padding:13px 12px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.04); }
+  .module-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:6px; }
+  .module-card-title { font-size:13px; font-weight:800; line-height:1.35; }
+  .module-card-check { width:20px; height:20px; border-radius:50%; flex-shrink:0; border:1.5px solid #cbd5e1; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:800; }
+  .module-card-sub { font-size:11px; margin-top:7px; line-height:1.4; }
+
+  .datecard { border:1.5px solid #e2e8f0; border-radius:12px; margin-bottom:12px; overflow:hidden; background:#fff; }
+  .datecard-head { display:flex; align-items:center; gap:8px; padding:12px 14px; cursor:pointer; }
+  .datecard-toprow { display:flex; justify-content:space-between; align-items:center; }
+  .datecard-date { font-weight:800; font-size:14.5px; color:#1e293b; }
+  .datecard-toggle { font-size:10.5px; color:#94a3b8; font-weight:600; flex-shrink:0; }
+  .datecard-badges { display:flex; flex-wrap:wrap; gap:5px; margin-top:7px; align-items:center; }
+  .datecard-count { font-size:10.5px; color:#94a3b8; font-weight:600; }
+  .mini-badge { font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; border:1px solid; white-space:nowrap; }
+  .datecard-body { border-top:1.5px solid #e2e8f0; background:#f8fafc; padding:12px; }
+  .datecard-record { background:#fff; border:1.5px solid #e2e8f0; border-radius:10px; padding:11px 12px; margin-bottom:10px; }
+  .datecard-record:last-child { margin-bottom:0; }
+  .datecard-record-top { display:flex; justify-content:space-between; align-items:flex-start; gap:8px; }
+  .datecard-record-badges { display:flex; flex-wrap:wrap; gap:5px; margin-top:8px; }
+  .datecard-record-summary { white-space:pre-wrap; font-family:inherit; font-size:11px; color:#475569; background:#f8fafc; border-radius:8px; padding:9px 10px; margin-top:9px; line-height:1.6; }
+
   @media (min-width: 720px) {
     .pad { max-width:640px; margin:0 auto; padding:18px 18px 100px; }
     .action-bar { max-width:640px; margin:0 auto; }
@@ -274,7 +296,7 @@ const TOUCH_FILAMENTS = [2.83, 3.61, 4.31, 4.56, 6.65];
 const TWO_POINT_OPTS = Array.from({length:15}, (_,i)=>i+1); // 1~15mm
 
 /* 배포 확인용 버전 표시 — 소소한 수정마다 0.01씩 올려서 사용 (1.0 ~ 1.99) */
-const APP_VERSION = "1.0";
+const APP_VERSION = "1.02";
 
 const STORAGE_KEY = "ot_hand_mft_eval_v1";
 
@@ -869,7 +891,7 @@ function ThumbLocBlock({ data, onChange, title }){
   const setImpaired = (side)=> onChange({...data, impairedSide: data.impairedSide===side ? "" : side});
   const setPos = (key, val)=> onChange({...data, [key]: val});
   return (
-    <Section title={title || "Thumb Localization Test"} sub="Impaired side 체크 후, Position 1~3을 0~3점 4점 척도로 채점">
+    <Section title={title || "Thumb Localization Test"} sub="Impaired side 체크 후, Position 1~3을 0~3점 4점 척도 또는 U/C로 채점">
       <Field label="Impaired side">
         <div className="grid2">
           <div className={"bbs-opt"+(data.impairedSide==="Rt"?" on":"")} onClick={()=>setImpaired("Rt")}>
@@ -883,8 +905,8 @@ function ThumbLocBlock({ data, onChange, title }){
         </div>
       </Field>
       {[["p1","Position 1"],["p2","Position 2"],["p3","Position 3"]].map(([key,label])=>(
-        <Field label={label} key={key}>
-          <SegPick options={[0,1,2,3]} value={data[key]} onChange={v=>setPos(key,v)} />
+        <Field label={label} key={key} hint="U/C = Unable to Check">
+          <SegPick options={[0,1,2,3,"U/C"]} value={data[key]} onChange={v=>setPos(key,v)} />
         </Field>
       ))}
     </Section>
@@ -1229,34 +1251,49 @@ function PurdueBlock({ purdue, setPath, title }){
 /* 하나의 항목 = "평가 시작하기"에서 체크할 수 있는 단위. render()는 공유 데이터(d)와 헬퍼를 받아 섹션을 그린다. */
 
 const MODULE_DEFS = [
-  { key:"jebsen", label:"Jebsen-Taylor Hand Function Test",
+  { key:"jebsen", label:"Jebsen-Taylor Hand Function Test", short:"7항목 · 항목별 초 타이머",
     render:(d,h)=> <JebsenBlock jebsen={d.jebsen} setJebsen={v=>h.setD({...d,jebsen:v})} /> },
-  { key:"handpower", label:"Hand power measurement",
+  { key:"handpower", label:"Hand power measurement", short:"Grasp(kg) · Grip(lb)",
     render:(d,h)=> <HandPowerBlock grip={d.grip} setPath={h.setPath} /> },
-  { key:"mftraw", label:"Manual Function Test (MFT) 세부항목",
+  { key:"mftraw", label:"Manual Function Test (MFT) 세부항목", short:"어깨·손 동작 8항목",
     render:(d,h)=> <MftRawBlock raw={d.raw} setRaw={h.setRaw} title="Manual Function Test (MFT)" /> },
-  { key:"oconnor", label:"O'Connor Finger Dexterity Test",
+  { key:"oconnor", label:"O'Connor Finger Dexterity Test", short:"분·초 입력 · 규준표 %tile",
     render:(d,h)=> <OconnorBlock data={d.oconnor} onChange={v=>h.setD({...d,oconnor:v})} /> },
-  { key:"boxblock", label:"Box and Block Test",
+  { key:"boxblock", label:"Box and Block Test", short:"60초 자동 타이머",
     render:(d,h)=> <BoxBlockBlock data={d.boxblock} onChange={v=>h.setD({...d,boxblock:v})} /> },
-  { key:"edinburgh", label:"Edinburgh Handedness Inventory - short form",
+  { key:"edinburgh", label:"Edinburgh Handedness Inventory - short form", short:"손잡이 4문항 · LQ 자동계산",
     render:(d,h)=> <EdinburghBlock edin={d.edin} setEdin={v=>h.setD({...d,edin:v})} title="Edinburgh Handedness Inventory — short form" /> },
-  { key:"fingertap", label:"Finger Tapping Test",
+  { key:"fingertap", label:"Finger Tapping Test", short:"10초 태핑 측정 도구 포함",
     render:(d,h)=> <FingerTapBlock tap={d.tap} setTap={v=>h.setD({...d,tap:v})} /> },
-  { key:"thumbloc", label:"Thumb Localization Test",
+  { key:"thumbloc", label:"Thumb Localization Test", short:"Impaired side · 4점 척도",
     render:(d,h)=> (
       <React.Fragment>
         <ThumbLocBlock data={d.thumbLoc} onChange={v=>h.setD({...d,thumbLoc:v})} />
         <TLTManualCard />
       </React.Fragment>
     ) },
-  { key:"dash", label:"DASH",
+  { key:"dash", label:"DASH", short:"Disability · Work · Sports",
     render:(d,h)=> <DashBlock dash={d.dash} setPath={h.setPath} /> },
-  { key:"sensibility", label:"Sensibility Test (Touch threshold / Two-point discrimination)",
+  { key:"sensibility", label:"Sensibility Test (Touch threshold / Two-point discrimination)", short:"모노필라멘트 · 2-point",
     render:(d,h)=> <SensibilityBlock sens={d.sens} setPath={h.setPath} /> },
-  { key:"purdue", label:"Purdue Pegboard Test",
+  { key:"purdue", label:"Purdue Pegboard Test", short:"30초·1분 타이머 포함",
     render:(d,h)=> <PurdueBlock purdue={d.purdue} setPath={h.setPath} /> },
 ];
+
+/* 항목 카드 색상 팔레트 (선택 화면·모아보기에서 공용으로 사용) */
+const MODULE_COLORS = {
+  jebsen:      { accent:"#7c3aed", bg:"#f5f3ff", border:"#ddd6fe", text:"#6d28d9" },
+  handpower:   { accent:"#2563eb", bg:"#eff6ff", border:"#bfdbfe", text:"#1d4ed8" },
+  mftraw:      { accent:"#0d9488", bg:"#f0fdfa", border:"#99f6e4", text:"#0f766e" },
+  oconnor:     { accent:"#d97706", bg:"#fffbeb", border:"#fde68a", text:"#b45309" },
+  boxblock:    { accent:"#db2777", bg:"#fdf2f8", border:"#fbcfe8", text:"#be185d" },
+  edinburgh:   { accent:"#4f46e5", bg:"#eef2ff", border:"#c7d2fe", text:"#4338ca" },
+  fingertap:   { accent:"#16a34a", bg:"#f0fdf4", border:"#bbf7d0", text:"#15803d" },
+  thumbloc:    { accent:"#e11d48", bg:"#fff1f2", border:"#fecdd3", text:"#be123c" },
+  dash:        { accent:"#0891b2", bg:"#ecfeff", border:"#a5f3fc", text:"#0e7490" },
+  sensibility: { accent:"#ea580c", bg:"#fff7ed", border:"#fed7aa", text:"#c2410c" },
+  purdue:      { accent:"#475569", bg:"#f8fafc", border:"#cbd5e1", text:"#334155" },
+};
 
 /* ---------------- 맞춤 평가 폼 (선택된 항목만 표시) ---------------- */
 
@@ -1381,14 +1418,30 @@ function ModulePickerModal({ initialModules, presets, onStart, onSavePreset, onD
             sub={`${selected.length} / ${MODULE_DEFS.length}개 선택됨`}
             right={<button className="mini-btn" onClick={toggleAll}>{selected.length===MODULE_DEFS.length?"전체 해제":"전체 선택"}</button>}
           >
-            {MODULE_DEFS.map(m=>(
-              <div key={m.key}
-                className={"bbs-opt"+(selected.includes(m.key)?" on":"")}
-                onClick={()=>toggle(m.key)}>
-                <div className="bbs-badge">{selected.includes(m.key)?"✓":""}</div>
-                <div className="txt">{m.label}</div>
-              </div>
-            ))}
+            <div className="module-grid">
+              {MODULE_DEFS.map(m=>{
+                const col = MODULE_COLORS[m.key];
+                const isOn = selected.includes(m.key);
+                return (
+                  <div key={m.key}
+                    className="module-card"
+                    style={{
+                      borderColor: isOn ? col.border : "#e2e8f0",
+                      background: isOn ? col.bg : "#f8fafc",
+                    }}
+                    onClick={()=>toggle(m.key)}>
+                    <div className="module-card-top">
+                      <div className="module-card-title" style={{color: isOn ? col.accent : "#64748b"}}>{m.label}</div>
+                      <div className="module-card-check" style={{
+                        background: isOn ? col.accent : "#fff",
+                        borderColor: isOn ? col.accent : "#cbd5e1",
+                      }}>{isOn?"✓":""}</div>
+                    </div>
+                    <div className="module-card-sub" style={{color: isOn ? col.text : "#94a3b8"}}>{m.short||""}</div>
+                  </div>
+                );
+              })}
+            </div>
           </Section>
         </div>
       </div>
@@ -1448,6 +1501,116 @@ function copyText(text, onDone){
       ta.select(); document.execCommand("copy"); document.body.removeChild(ta); onDone(true);
     }catch(e){ onDone(false); }
   }
+}
+
+/* 날짜별로 기록을 묶어서 "모아보기"에서 사용 */
+function groupByDate(records){
+  const map = {};
+  records.forEach(rec=>{
+    const d = rec.data.date || "날짜 미입력";
+    if(!map[d]) map[d] = [];
+    map[d].push(rec);
+  });
+  const dates = Object.keys(map).sort((a,b)=>{
+    if(a==="날짜 미입력") return 1;
+    if(b==="날짜 미입력") return -1;
+    return b.localeCompare(a);
+  });
+  return { map, dates };
+}
+
+function buildDateSummary(dateStr, recs){
+  const sorted = recs.slice().sort((a,b)=>a.createdAt-b.createdAt);
+  let s = `[${dateStr}] 평가결과 모아보기\n`;
+  sorted.forEach((rec,i)=>{
+    s += `\n${i+1}) ${buildSummary(rec)}\n`;
+  });
+  return s.trim();
+}
+
+/* ---------------- 평가결과 모아보기 화면 ---------------- */
+
+function CollectView({ records, onEdit, toast }){
+  const { map, dates } = groupByDate(records);
+  const [openDate, setOpenDate] = useState(dates[0] || null);
+
+  if(dates.length===0){
+    return (
+      <div className="scroll-area">
+        <div className="pad">
+          <div className="empty-state">
+            <div className="big">🗂️</div>
+            <div style={{fontWeight:700, marginBottom:4}}>모아볼 기록이 없습니다</div>
+            <div style={{fontSize:12.5}}>평가를 저장하면 날짜별로 여기에 모여서 보입니다</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="scroll-area">
+      <div className="pad">
+        {dates.map(d=>{
+          const recs = map[d].slice().sort((a,b)=>a.createdAt-b.createdAt);
+          const isOpen = openDate===d;
+          const allModuleKeys = [...new Set(recs.flatMap(r=>r.modules||[]))];
+          return (
+            <div key={d} className="datecard">
+              <div className="datecard-head" onClick={()=>setOpenDate(isOpen?null:d)}>
+                <div style={{flex:1, minWidth:0}}>
+                  <div className="datecard-toprow">
+                    <span className="datecard-date">{d}</span>
+                    <span className="datecard-toggle">{isOpen?"접기 ▲":"펼치기 ▼"}</span>
+                  </div>
+                  <div className="datecard-badges">
+                    {allModuleKeys.map(k=>{
+                      const def = MODULE_DEFS.find(m=>m.key===k);
+                      const col = MODULE_COLORS[k] || MODULE_COLORS.purdue;
+                      return <span key={k} className="mini-badge" style={{background:col.bg,color:col.accent,borderColor:col.border}}>{def?def.label.split(" ")[0]:k}</span>;
+                    })}
+                    <span className="datecard-count">{recs.length}건</span>
+                  </div>
+                </div>
+                <button className="mini-btn primary" onClick={e=>{
+                  e.stopPropagation();
+                  copyText(buildDateSummary(d, recs), ok=>toast(ok?"이 날짜 결과를 모두 복사했습니다":"복사에 실패했습니다"));
+                }}>결과 복사</button>
+              </div>
+
+              {isOpen && (
+                <div className="datecard-body">
+                  {recs.map(rec=>(
+                    <div key={rec.id} className="datecard-record">
+                      <div className="datecard-record-top">
+                        <div>
+                          <div style={{fontWeight:800, fontSize:12.5, color:"#1e293b"}}>
+                            {rec.data.evalType || "평가"}
+                          </div>
+                          <div style={{fontSize:10.5, color:"#94a3b8", marginTop:2}}>
+                            {fmtDT(rec.createdAt)} 작성
+                          </div>
+                        </div>
+                        <button className="mini-btn" onClick={()=>onEdit(rec.id)}>열람/수정</button>
+                      </div>
+                      <div className="datecard-record-badges">
+                        {(rec.modules||[]).map(k=>{
+                          const def = MODULE_DEFS.find(m=>m.key===k);
+                          const col = MODULE_COLORS[k] || MODULE_COLORS.purdue;
+                          return <span key={k} className="mini-badge" style={{background:col.bg,color:col.accent,borderColor:col.border}}>{def?def.label:k}</span>;
+                        })}
+                      </div>
+                      <pre className="datecard-record-summary">{buildSummary(rec)}</pre>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 /* ---------------- 목록 화면 ---------------- */
@@ -1613,7 +1776,7 @@ function FloatingTimer(){
 
 function App(){
   const [db, setDb] = useState(loadDB);
-  const [screen, setScreen] = useState("list"); // list | form
+  const [screen, setScreen] = useState("list"); // list | form | collect
   const [editingId, setEditingId] = useState(null);
   const [currentModules, setCurrentModules] = useState([]);
   const [toastMsg, setToastMsg] = useState("");
@@ -1621,13 +1784,16 @@ function App(){
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pickerMode, setPickerMode] = useState("new"); // new | adjust
   const [pickerInitial, setPickerInitial] = useState([]);
+  const [returnScreen, setReturnScreen] = useState("list"); // where to go back to after form: list | collect
 
   useEffect(()=>{ saveDB(db); }, [db]);
   useEffect(()=>{ document.title = `작업치료 평가 도구 v${APP_VERSION}`; }, []);
 
+  const toastTimerRef = useRef(null);
   const toast = (msg)=>{
     setToastMsg(msg);
-    setTimeout(()=>setToastMsg(""), 1800);
+    if(toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(()=>setToastMsg(""), 1800);
   };
 
   const records = db.custom;
@@ -1639,6 +1805,7 @@ function App(){
     if(pickerMode==="new"){
       setCurrentModules(selected);
       setEditingId(null);
+      setReturnScreen("list");
       setScreen("form");
     } else {
       setCurrentModules(selected);
@@ -1655,14 +1822,17 @@ function App(){
     setDb(prev=>({...prev, presets: prev.presets.filter(p=>p.id!==id)}));
   };
 
-  const openEdit = (id)=>{
+  const openEdit = (id, from="list")=>{
     const rec = records.find(r=>r.id===id);
     if(!rec) return;
     setEditingId(id);
     setCurrentModules(rec.modules||[]);
+    setReturnScreen(from);
     setScreen("form");
   };
-  const cancelForm = ()=>{ setScreen("list"); setEditingId(null); };
+  const cancelForm = ()=>{ setScreen(returnScreen); setEditingId(null); };
+  const openCollect = ()=> setScreen("collect");
+  const backToListFromCollect = ()=> setScreen("list");
 
   const doDelete = (id)=>{
     setDb(prev=>({...prev, custom: prev.custom.filter(r=>r.id!==id)}));
@@ -1678,7 +1848,7 @@ function App(){
   const requestDeleteFromForm = ()=>{
     setConfirmState({
       message: "이 기록을 삭제하시겠습니까? 삭제하면 되돌릴 수 없습니다.",
-      onConfirm: ()=>{ doDelete(editingId); setConfirmState(null); setScreen("list"); setEditingId(null); }
+      onConfirm: ()=>{ doDelete(editingId); setConfirmState(null); setScreen(returnScreen); setEditingId(null); }
     });
   };
 
@@ -1694,7 +1864,7 @@ function App(){
       }
     });
     toast("저장되었습니다");
-    setScreen("list"); setEditingId(null);
+    setScreen(returnScreen); setEditingId(null);
   };
 
   const editingRecord = editingId ? records.find(r=>r.id===editingId) : null;
@@ -1704,15 +1874,21 @@ function App(){
     <React.Fragment>
       <div className="topbar">
         <div className="brand"><div className="logo">✋</div>작업치료 평가 도구<span className="version-badge">v{APP_VERSION}</span></div>
+        {screen==="list" && <button className="icon-btn" title="평가결과 모아보기" onClick={openCollect}>🗂️</button>}
         {screen==="form" && <button className="icon-btn" onClick={cancelForm}>✕</button>}
+        {screen==="collect" && <button className="icon-btn" onClick={backToListFromCollect}>✕</button>}
       </div>
 
-      {screen==="list" ? (
+      {screen==="list" && (
         <React.Fragment>
           <ListView records={records} onEdit={openEdit} onRequestDelete={requestDeleteFromList} toast={toast} />
           <button className="fab" onClick={openPickerForNew}>＋ 평가 시작하기</button>
         </React.Fragment>
-      ) : (
+      )}
+      {screen==="collect" && (
+        <CollectView records={records} onEdit={id=>openEdit(id,"collect")} toast={toast} />
+      )}
+      {screen==="form" && (
         <FormCustom
           key={editingId || "new"}
           initial={formInitial}
