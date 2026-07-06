@@ -296,30 +296,54 @@ const TOUCH_FILAMENTS = [2.83, 3.61, 4.31, 4.56, 6.65];
 const TWO_POINT_OPTS = Array.from({length:15}, (_,i)=>i+1); // 1~15mm
 
 /* 배포 확인용 버전 표시 — 소소한 수정마다 0.01씩 올려서 사용 (1.0 ~ 1.99) */
-const APP_VERSION = "1.02";
+const APP_VERSION = "1.04";
 
 const STORAGE_KEY = "ot_hand_mft_eval_v1";
 
 /* ---------------- 저장 / 로드 ---------------- */
+
+function genPatientId(patients){
+  let n = 1;
+  while(patients.find(p=>p.id==="#"+n)) n++;
+  return "#"+n;
+}
+function genPatientLabel(){
+  const now = new Date();
+  const mm = String(now.getMonth()+1).padStart(2,"0");
+  const dd = String(now.getDate()).padStart(2,"0");
+  const hh = String(now.getHours()).padStart(2,"0");
+  const mi = String(now.getMinutes()).padStart(2,"0");
+  return `신환${mm}/${dd}-${hh}:${mi}`;
+}
 
 function loadDB(){
   try {
     const r = localStorage.getItem(STORAGE_KEY);
     if(r){
       const d = JSON.parse(r);
-      if(d.custom){
-        return { custom: d.custom||[], presets: d.presets||[] };
+      if(d.patients){
+        return { patients: d.patients||[], custom: d.custom||[], presets: d.presets||[] };
       }
-      // 이전 버전(탭 고정형) 데이터 마이그레이션 — 기록이 사라지지 않도록 모듈 목록을 붙여서 이관
-      const OLD_HF_MODULES = ["jebsen","handpower","mftraw","oconnor","boxblock","edinburgh","fingertap","thumbloc"];
-      const OLD_MFT_MODULES = ["edinburgh","mftraw","fingertap","boxblock","thumbloc","oconnor","handpower","dash","sensibility","purdue"];
-      const custom = [];
-      (d.hf||[]).forEach(rec=> custom.push({...rec, modules: OLD_HF_MODULES}));
-      (d.mft||[]).forEach(rec=> custom.push({...rec, modules: OLD_MFT_MODULES}));
-      return { custom, presets: [] };
+      // 환자 명단 도입 이전 데이터 마이그레이션 — 기존 기록을 "이전 기록" 환자 밑으로 이관
+      let custom = d.custom || [];
+      if(!d.custom){
+        // 더 이전(탭 고정형) 데이터까지 순차 마이그레이션
+        const OLD_HF_MODULES = ["jebsen","handpower","mftraw","oconnor","boxblock","edinburgh","fingertap","thumbloc"];
+        const OLD_MFT_MODULES = ["edinburgh","mftraw","fingertap","boxblock","thumbloc","oconnor","handpower","dash","sensibility","purdue"];
+        custom = [];
+        (d.hf||[]).forEach(rec=> custom.push({...rec, modules: OLD_HF_MODULES}));
+        (d.mft||[]).forEach(rec=> custom.push({...rec, modules: OLD_MFT_MODULES}));
+      }
+      const patients = [];
+      if(custom.length>0){
+        const legacyPatient = { id:"#1", label:"이전 기록", createdAt: custom.reduce((min,r)=>Math.min(min,r.createdAt||Date.now()),Date.now()) };
+        patients.push(legacyPatient);
+        custom = custom.map(rec=> ({...rec, patientId: legacyPatient.id}));
+      }
+      return { patients, custom, presets: d.presets || [] };
     }
   } catch(e){}
-  return { custom:[], presets:[] };
+  return { patients:[], custom:[], presets:[] };
 }
 function saveDB(db){
   try {
@@ -341,9 +365,16 @@ function num(v){ const n = parseFloat(v); return isNaN(n) ? null : n; }
 
 /* ---------------- 기본 데이터 ---------------- */
 
+function todayStr(){
+  const d = new Date();
+  const mm = String(d.getMonth()+1).padStart(2,"0");
+  const dd = String(d.getDate()).padStart(2,"0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
 function emptyShared(){
   return {
-    date:"", evalType:"", note:"",
+    date:todayStr(), evalType:"", note:"",
     dash:{ disability:"", work:"", sports:"" },
     sens:{
       touch:{ rt:["","","","",""], lt:["","","","",""] },
@@ -1613,6 +1644,57 @@ function CollectView({ records, onEdit, toast }){
   );
 }
 
+/* ---------------- 환자 명단 화면 ---------------- */
+
+function PatientListPanel({ patients, recordCounts, onSelect, onAdd, onRequestDelete }){
+  const [search, setSearch] = useState("");
+  const filtered = patients
+    .filter(p=> !search || p.id.includes(search) || p.label.toLowerCase().includes(search.toLowerCase()))
+    .slice()
+    .sort((a,b)=> (b.createdAt||0) - (a.createdAt||0));
+
+  return (
+    <React.Fragment>
+      <div className="scroll-area">
+        <div className="pad">
+          <Field>
+            <TextInput value={search} onChange={setSearch} placeholder="검색 (ID 또는 라벨)" />
+          </Field>
+
+          {filtered.length===0 ? (
+            <div className="empty-state">
+              <div className="big">🧑‍⚕️</div>
+              <div style={{fontWeight:700, marginBottom:4}}>{search?"검색 결과가 없습니다":"등록된 환자가 없습니다"}</div>
+              <div style={{fontSize:12.5}}>오른쪽 아래 "환자 추가" 버튼으로 새 환자를 만드세요</div>
+            </div>
+          ) : (
+            filtered.map(p=>(
+              <div className="card" key={p.id}>
+                <div onClick={()=>onSelect(p.id)}>
+                  <div className="rec-top">
+                    <div>
+                      <div className="rec-date"><span style={{fontFamily:"monospace", color:"#7c3aed", marginRight:6}}>{p.id}</span>{p.label}</div>
+                    </div>
+                  </div>
+                  <div className="rec-meta">
+                    평가 기록 {recordCounts[p.id]||0}건<br/>
+                    생성 {fmtDT(p.createdAt)}
+                  </div>
+                </div>
+                <div className="rec-actions">
+                  <button className="mini-btn primary" onClick={()=>onSelect(p.id)}>평가 기록 보기</button>
+                  <button className="mini-btn danger" onClick={()=>onRequestDelete(p.id)}>삭제</button>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+      <button className="fab" onClick={onAdd}>＋ 환자 추가</button>
+    </React.Fragment>
+  );
+}
+
 /* ---------------- 목록 화면 ---------------- */
 
 function ListView({ records, onEdit, onRequestDelete, toast }){
@@ -1776,7 +1858,8 @@ function FloatingTimer(){
 
 function App(){
   const [db, setDb] = useState(loadDB);
-  const [screen, setScreen] = useState("list"); // list | form | collect
+  const [screen, setScreen] = useState("patients"); // patients | list | form | collect
+  const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [editingId, setEditingId] = useState(null);
   const [currentModules, setCurrentModules] = useState([]);
   const [toastMsg, setToastMsg] = useState("");
@@ -1796,7 +1879,32 @@ function App(){
     toastTimerRef.current = setTimeout(()=>setToastMsg(""), 1800);
   };
 
-  const records = db.custom;
+  const records = db.custom.filter(r=>r.patientId===selectedPatientId);
+  const selectedPatient = db.patients.find(p=>p.id===selectedPatientId) || null;
+  const recordCounts = {};
+  db.custom.forEach(r=>{ recordCounts[r.patientId] = (recordCounts[r.patientId]||0) + 1; });
+
+  const selectPatient = (id)=>{ setSelectedPatientId(id); setScreen("list"); };
+  const backToPatients = ()=>{ setScreen("patients"); setSelectedPatientId(null); };
+
+  const addPatient = ()=>{
+    const patient = { id: genPatientId(db.patients), label: genPatientLabel(), createdAt: Date.now() };
+    setDb(prev=>({...prev, patients:[...prev.patients, patient]}));
+    setSelectedPatientId(patient.id);
+    setScreen("list");
+  };
+
+  const doDeletePatient = (id)=>{
+    setDb(prev=>({...prev, patients: prev.patients.filter(p=>p.id!==id), custom: prev.custom.filter(r=>r.patientId!==id)}));
+    toast("환자와 관련 기록이 삭제되었습니다");
+  };
+  const requestDeletePatient = (id)=>{
+    const cnt = recordCounts[id]||0;
+    setConfirmState({
+      message: `이 환자를 삭제하면 저장된 평가 기록 ${cnt}건이 모두 함께 삭제됩니다. 삭제하시겠습니까?`,
+      onConfirm: ()=>{ doDeletePatient(id); setConfirmState(null); }
+    });
+  };
 
   const openPickerForNew = ()=>{ setPickerInitial([]); setPickerMode("new"); setPickerOpen(true); };
   const openPickerForAdjust = ()=>{ setPickerInitial(currentModules); setPickerMode("adjust"); setPickerOpen(true); };
@@ -1859,7 +1967,7 @@ function App(){
         const updated = prev.custom.map(r=> r.id===editingId ? {...r, data, modules: currentModules, updatedAt: now} : r);
         return {...prev, custom: updated};
       } else {
-        const rec = { id: uid(), createdAt: now, updatedAt: now, modules: currentModules, data };
+        const rec = { id: uid(), patientId: selectedPatientId, createdAt: now, updatedAt: now, modules: currentModules, data };
         return {...prev, custom: [rec, ...prev.custom]};
       }
     });
@@ -1873,12 +1981,30 @@ function App(){
   return (
     <React.Fragment>
       <div className="topbar">
-        <div className="brand"><div className="logo">✋</div>작업치료 평가 도구<span className="version-badge">v{APP_VERSION}</span></div>
+        {screen==="patients" ? (
+          <div className="brand"><div className="logo">✋</div>작업치료 평가 도구<span className="version-badge">v{APP_VERSION}</span></div>
+        ) : (
+          <div className="brand" style={{cursor:"pointer"}} onClick={backToPatients}>
+            <span style={{fontSize:18}}>←</span>
+            {selectedPatient && <span style={{fontFamily:"monospace", color:"#7c3aed", fontSize:13}}>{selectedPatient.id}</span>}
+            {selectedPatient?.label}
+            <span className="version-badge">v{APP_VERSION}</span>
+          </div>
+        )}
         {screen==="list" && <button className="icon-btn" title="평가결과 모아보기" onClick={openCollect}>🗂️</button>}
         {screen==="form" && <button className="icon-btn" onClick={cancelForm}>✕</button>}
         {screen==="collect" && <button className="icon-btn" onClick={backToListFromCollect}>✕</button>}
       </div>
 
+      {screen==="patients" && (
+        <PatientListPanel
+          patients={db.patients}
+          recordCounts={recordCounts}
+          onSelect={selectPatient}
+          onAdd={addPatient}
+          onRequestDelete={requestDeletePatient}
+        />
+      )}
       {screen==="list" && (
         <React.Fragment>
           <ListView records={records} onEdit={openEdit} onRequestDelete={requestDeleteFromList} toast={toast} />
@@ -1907,7 +2033,7 @@ function App(){
 
       {confirmState && (
         <ConfirmModal
-          title="기록 삭제"
+          title="삭제 확인"
           message={confirmState.message}
           confirmText="삭제"
           cancelText="취소"
