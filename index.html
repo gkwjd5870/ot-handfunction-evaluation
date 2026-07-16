@@ -53,7 +53,7 @@ self.addEventListener('fetch', e => {
 <meta name="apple-mobile-web-app-status-bar-style" content="default" />
 <meta name="apple-mobile-web-app-title" content="작업치료 평가 도구" />
 <meta name="theme-color" content="#7c3aed" />
-<title>작업치료 평가 도구 v1.0</title>
+<title>작업치료 평가 도구</title>
 <link rel="manifest" href="manifest.json" />
 <link rel="apple-touch-icon" href="apple-touch-icon.png" />
 <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
@@ -74,6 +74,7 @@ self.addEventListener('fetch', e => {
   .brand .logo { width:26px;height:26px;border-radius:8px;background:#7c3aed;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800; }
   .icon-btn { border:none; background:transparent; color:#64748b; font-size:20px; padding:6px 8px; border-radius:8px; cursor:pointer; }
   .icon-btn.danger-text { color:#ef4444; font-size:12.5px; font-weight:700; white-space:nowrap; }
+  .font-scale-btn { font-size:12.5px; font-weight:800; color:#475569; white-space:nowrap; border:1.5px solid #e2e8f0; border-radius:8px; padding:5px 9px; }
   .icon-btn:active { background:#f1f5f9; }
 
   .tabbar { display:flex; gap:6px; background:#fff; padding:8px 12px; border-bottom:1.5px solid #e2e8f0; flex-shrink:0; }
@@ -221,12 +222,12 @@ self.addEventListener('fetch', e => {
   .tap-hint { margin-top:10px; font-size:13px; color:#7c3aed; font-weight:700; text-align:center; padding:0 18px; }
   .tap-save-row { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
 
-  .module-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
-  .module-card { border:2px solid #e2e8f0; border-radius:12px; padding:13px 12px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.04); }
-  .module-card-top { display:flex; justify-content:space-between; align-items:flex-start; gap:6px; }
-  .module-card-title { font-size:13px; font-weight:800; line-height:1.35; }
-  .module-card-check { width:20px; height:20px; border-radius:50%; flex-shrink:0; border:1.5px solid #cbd5e1; display:flex; align-items:center; justify-content:center; color:#fff; font-size:11px; font-weight:800; }
-  .module-card-sub { font-size:11px; margin-top:7px; line-height:1.4; }
+  .module-grid { display:flex; flex-direction:column; gap:8px; }
+  .module-card { display:flex; align-items:center; gap:10px; border:2px solid #e2e8f0; border-radius:12px; padding:11px 13px; cursor:pointer; box-shadow:0 2px 6px rgba(0,0,0,0.04); }
+  .module-card-check { width:22px; height:22px; border-radius:50%; flex-shrink:0; border:1.5px solid #cbd5e1; display:flex; align-items:center; justify-content:center; color:#fff; font-size:12px; font-weight:800; }
+  .module-card-text { flex:1; min-width:0; line-height:1.4; }
+  .module-card-title { font-size:13px; font-weight:800; }
+  .module-card-sub { font-size:11.5px; }
 
   .datecard { border:1.5px solid #e2e8f0; border-radius:12px; margin-bottom:12px; overflow:hidden; background:#fff; }
   .datecard-head { display:flex; align-items:center; gap:8px; padding:12px 14px; cursor:pointer; }
@@ -250,6 +251,7 @@ self.addEventListener('fetch', e => {
   .patient-label { font-weight:700; font-size:14px; color:#1e293b; }
   .patient-count { font-size:11px; color:#94a3b8; }
   .patient-sub { font-size:11px; color:#94a3b8; margin-top:3px; }
+  .patient-memo { font-size:11.5px; color:#7c3aed; margin-top:5px; white-space:pre-wrap; line-height:1.4; }
   .patient-del-btn { flex-shrink:0; border:1.5px solid #fecaca; background:#fff; color:#dc2626; border-radius:9px; width:36px; height:36px; font-size:15px; cursor:pointer; }
 
   .bottom-panel { position:sticky; bottom:0; background:#fff; border-top:1.5px solid #e2e8f0; padding:12px 14px calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:9px; flex-shrink:0; }
@@ -311,7 +313,7 @@ const TOUCH_FILAMENTS = [2.83, 3.61, 4.31, 4.56, 6.65];
 const TWO_POINT_OPTS = Array.from({length:15}, (_,i)=>i+1); // 1~15mm
 
 /* 배포 확인용 버전 표시 — 소소한 수정마다 0.01씩 올려서 사용 (1.0 ~ 1.99) */
-const APP_VERSION = "1.05";
+const APP_VERSION = "1.10";
 
 const STORAGE_KEY = "ot_hand_mft_eval_v1";
 
@@ -397,6 +399,7 @@ function emptyShared(){
     },
     grip:{
       grasp:{ rt:"", lt:"" },
+      graspUnit:"kg",
       gripLateral:{ rt:"", lt:"" },
       gripTip:{ rt:"", lt:"" },
       gripThreeJaw:{ rt:"", lt:"" },
@@ -959,6 +962,49 @@ function ThumbLocBlock({ data, onChange, title }){
   );
 }
 
+/* O'Connor용 스톱워치 — 정지하면 경과 시간을 분/초로 환산해 onFinish(min,sec)로 전달 */
+function OconnorTimer({ onFinish }){
+  const [running, setRunning] = useState(false);
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(0);
+  const intervalRef = useRef(null);
+
+  useEffect(()=>{
+    if(running){
+      startRef.current = Date.now();
+      intervalRef.current = setInterval(()=>{ setElapsed(Date.now()-startRef.current); }, 100);
+    } else {
+      clearInterval(intervalRef.current);
+    }
+    return ()=>clearInterval(intervalRef.current);
+  }, [running]);
+
+  const start = ()=>{ setElapsed(0); setRunning(true); };
+  const stop = ()=>{
+    setRunning(false);
+    const totalSec = elapsed/1000;
+    const min = Math.floor(totalSec/60);
+    const sec = +(totalSec - min*60).toFixed(1);
+    onFinish(min, sec);
+  };
+
+  const fmt = (ms)=>{
+    const s = ms/1000;
+    const mm = Math.floor(s/60);
+    const ss = (s%60).toFixed(1);
+    return (mm<10?"0"+mm:mm)+":"+(parseFloat(ss)<10?"0"+ss:ss);
+  };
+
+  return (
+    <div style={{display:"flex", alignItems:"center", gap:10, marginBottom:12}}>
+      {!running
+        ? <button type="button" className="inline-timer-btn" onClick={start}>▶ 측정 시작</button>
+        : <button type="button" className="inline-timer-btn running" onClick={stop}>■ 정지 (기록)</button>}
+      <div className="inline-timer-display">{fmt(elapsed)}</div>
+    </div>
+  );
+}
+
 function OconnorBlock({ data, onChange, title }){
   const setField = (side, key, val)=> onChange({...data, [side]:{...data[side], [key]:val}});
   const genderKey = data.gender ? data.gender.toLowerCase() : "";
@@ -967,11 +1013,45 @@ function OconnorBlock({ data, onChange, title }){
   const pctRt = rawRt===null ? null : oconnorPercentile(rawRt, genderKey);
   const pctLt = rawLt===null ? null : oconnorPercentile(rawLt, genderKey);
 
+  const [selSide, setSelSide] = useState("Rt");
+  const [selHalf, setSelHalf] = useState("First half");
+  const [pendingSave, setPendingSave] = useState(null); // {side, half, min, sec, existingMin, existingSec}
+
+  const handleFinish = (min, sec)=>{
+    const side = selSide.toLowerCase();
+    const halfKey = selHalf==="First half" ? "first" : "second";
+    const minKey = halfKey+"Min", secKey = halfKey+"Sec";
+    const existingMin = data[side][minKey], existingSec = data[side][secKey];
+    const hasExisting = (existingMin!=="" && existingMin!=null) || (existingSec!=="" && existingSec!=null);
+    if(hasExisting){
+      setPendingSave({ side, minKey, secKey, min, sec, existingMin, existingSec, sideLabel:selSide, halfLabel:selHalf });
+    } else {
+      setField(side, minKey, String(min));
+      setField(side, secKey, String(sec));
+    }
+  };
+
   return (
     <Section title={title || "O'Connor Finger Dexterity Test"} sub="Raw score = {First half + (1.1 × Second half)} ÷ 2 (초 환산)">
       <Field label="성별" hint="규준표(Male/Female)가 다르게 적용됩니다">
         <SegPick options={["Male","Female"]} value={data.gender} onChange={v=>onChange({...data, gender:v})} />
       </Field>
+
+      <div className="side-label">측정 도구</div>
+      <Field label="저장할 칸" hint="측정을 시작하기 전에 먼저 골라두세요">
+        <div className="grid2">
+          <div>
+            <div className="col-label">쪽</div>
+            <SegPick options={["Rt","Lt"]} value={selSide} onChange={setSelSide} />
+          </div>
+          <div>
+            <div className="col-label">구간</div>
+            <SegPick options={["First half","Second half"]} value={selHalf} onChange={setSelHalf} />
+          </div>
+        </div>
+      </Field>
+      <OconnorTimer onFinish={handleFinish} />
+
       <table className="datatable">
         <thead>
           <tr><th></th><th>Min</th><th>Sec</th></tr>
@@ -1024,7 +1104,22 @@ function OconnorBlock({ data, onChange, title }){
           </tr>
         </tbody>
       </table>
-      <div className="footer-note" style={{padding:"6px 2px 0"}}>Min/Sec = 분/초. Raw score는 First half·Second half를 초로 환산해 자동 계산되며, %tile rank는 병원 규준표(Men/Women, 13개 구간)에서 raw score 이하인 첫 구간 값을 그대로 사용합니다(엑셀 원본과 동일한 계단식 매칭).</div>
+      <div className="footer-note" style={{padding:"6px 2px 0"}}>Min/Sec = 분/초. 위 측정 도구로 시간을 재면 정지하는 순간 분·초로 자동 환산되어 선택한 칸에 입력됩니다. Raw score는 First half·Second half를 초로 환산해 자동 계산되며, %tile rank는 병원 규준표(Men/Women, 13개 구간)에서 raw score 이하인 첫 구간 값을 그대로 사용합니다(엑셀 원본과 동일한 계단식 매칭).</div>
+
+      {pendingSave && (
+        <ConfirmModal
+          title="기존 값 변경"
+          message={`${pendingSave.sideLabel} ${pendingSave.halfLabel} 칸에 이미 ${pendingSave.existingMin||0}분 ${pendingSave.existingSec||0}초가 입력되어 있습니다. ${pendingSave.min}분 ${pendingSave.sec}초로 바꾸시겠습니까?`}
+          confirmText="바꾸기"
+          cancelText="취소"
+          onCancel={()=>setPendingSave(null)}
+          onConfirm={()=>{
+            setField(pendingSave.side, pendingSave.minKey, String(pendingSave.min));
+            setField(pendingSave.side, pendingSave.secKey, String(pendingSave.sec));
+            setPendingSave(null);
+          }}
+        />
+      )}
     </Section>
   );
 }
@@ -1151,8 +1246,11 @@ function JebsenBlock({ jebsen, setJebsen, title }){
 function HandPowerBlock({ grip, setPath, title }){
   return (
     <Section title={title || "Hand power measurement"}>
+      <Field label="Grasp power 단위">
+        <SegPick options={["kg","lb"]} value={grip.graspUnit||"kg"} onChange={v=>setPath(["grip","graspUnit"],v)} />
+      </Field>
       <RtLtRow label="Grasp power" rt={grip.grasp.rt} lt={grip.grasp.lt}
-        onRt={v=>setPath(["grip","grasp","rt"],v)} onLt={v=>setPath(["grip","grasp","lt"],v)} suffix="kg" />
+        onRt={v=>setPath(["grip","grasp","rt"],v)} onLt={v=>setPath(["grip","grasp","lt"],v)} suffix={grip.graspUnit||"kg"} />
       <div className="side-label">Grip power (lb)</div>
       <RtLtRow label="lateral pinch" rt={grip.gripLateral.rt} lt={grip.gripLateral.lt}
         onRt={v=>setPath(["grip","gripLateral","rt"],v)} onLt={v=>setPath(["grip","gripLateral","lt"],v)} suffix="lb" />
@@ -1427,6 +1525,27 @@ function PromptModal({ title, placeholder, onCancel, onConfirm }){
   );
 }
 
+function MemoModal({ initialValue, mode, onCancel, onConfirm }){
+  const [val, setVal] = useState(initialValue||"");
+  return (
+    <div className="modal-backdrop" onClick={onCancel}>
+      <div className="modal-box" onClick={e=>e.stopPropagation()}>
+        <div className="modal-title">{mode==="new" ? "환자 메모 (선택)" : "환자 메모 수정"}</div>
+        <div className="modal-msg">환자를 구분하는 데 도움이 될 메모를 남겨보세요. 이름·등록번호 등 개인정보는 적지 마세요.</div>
+        <textarea
+          className="text-input" style={{minHeight:80, marginBottom:16}} autoFocus
+          value={val} placeholder="예: 우측 편마비, 재활 3주차"
+          onChange={e=>setVal(e.target.value)}
+        />
+        <div className="modal-actions">
+          <button className="btn cancel" onClick={onCancel}>{mode==="new"?"건너뛰기":"취소"}</button>
+          <button className="btn save" onClick={()=>onConfirm(val)}>{mode==="new"?"추가":"저장"}</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* ---------------- 평가 항목 선택 모달 ("평가 시작하기" / "항목 변경") ---------------- */
 
 function ModulePickerModal({ initialModules, presets, onStart, onSavePreset, onDeletePreset, onClose }){
@@ -1476,14 +1595,14 @@ function ModulePickerModal({ initialModules, presets, onStart, onSavePreset, onD
                       background: isOn ? col.bg : "#f8fafc",
                     }}
                     onClick={()=>toggle(m.key)}>
-                    <div className="module-card-top">
-                      <div className="module-card-title" style={{color: isOn ? col.accent : "#64748b"}}>{m.label}</div>
-                      <div className="module-card-check" style={{
-                        background: isOn ? col.accent : "#fff",
-                        borderColor: isOn ? col.accent : "#cbd5e1",
-                      }}>{isOn?"✓":""}</div>
+                    <div className="module-card-check" style={{
+                      background: isOn ? col.accent : "#fff",
+                      borderColor: isOn ? col.accent : "#cbd5e1",
+                    }}>{isOn?"✓":""}</div>
+                    <div className="module-card-text">
+                      <span className="module-card-title" style={{color: isOn ? col.accent : "#334155"}}>{m.label}</span>
+                      {m.short && <span className="module-card-sub" style={{color: isOn ? col.text : "#94a3b8"}}> · {m.short}</span>}
                     </div>
-                    <div className="module-card-sub" style={{color: isOn ? col.text : "#94a3b8"}}>{m.short||""}</div>
                   </div>
                 );
               })}
@@ -1512,7 +1631,7 @@ function ModulePickerModal({ initialModules, presets, onStart, onSavePreset, onD
 
 const MODULE_SUMMARY = {
   jebsen: d => `- Jebsen-Taylor 항목1(짧은 문장쓰기) Dom/Non-dom: ${d.jebsen[0].dom||"-"} / ${d.jebsen[0].nondom||"-"}초`,
-  handpower: d => `- Hand power - Grasp(kg) Rt/Lt: ${d.grip.grasp.rt||"-"} / ${d.grip.grasp.lt||"-"}`,
+  handpower: d => `- Hand power - Grasp(${d.grip.graspUnit||"kg"}) Rt/Lt: ${d.grip.grasp.rt||"-"} / ${d.grip.grasp.lt||"-"}`,
   mftraw: d => `- MFT 세부항목 응답: ${d.raw.filter(r=>r.rt!==null||r.lt!==null).length}/${MFT_RAW_ITEMS.length}개`,
   oconnor: d => {
     const r1 = oconnorRaw(d.oconnor.rt), r2 = oconnorRaw(d.oconnor.lt);
@@ -1688,6 +1807,7 @@ function PatientListPanel({ patients, recordCounts, onSelect, onAdd, onRequestDe
                     <span className="patient-count">{recordCounts[p.id]||0}건</span>
                   </div>
                   <div className="patient-sub">최초생성일시 {fmtDT(p.createdAt)}</div>
+                  {p.memo && <div className="patient-memo">📝 {p.memo}</div>}
                 </div>
                 <button className="patient-del-btn" onClick={e=>{ e.stopPropagation(); onRequestDelete(p.id); }}>🗑</button>
               </div>
@@ -1878,9 +1998,27 @@ function App(){
   const [pickerMode, setPickerMode] = useState("new"); // new | adjust
   const [pickerInitial, setPickerInitial] = useState([]);
   const [returnScreen, setReturnScreen] = useState("list"); // where to go back to after form: list | collect
+  const [fontScale, setFontScale] = useState(()=>{
+    try { return localStorage.getItem("ot_font_scale") || "md"; } catch(e){ return "md"; }
+  });
 
   useEffect(()=>{ saveDB(db); }, [db]);
   useEffect(()=>{ document.title = `작업치료 평가 도구 v${APP_VERSION}`; }, []);
+  useEffect(()=>{
+    const scaleMap = { sm:"0.9", md:"1", lg:"1.15" };
+    const root = document.getElementById("root");
+    if(root) root.style.zoom = scaleMap[fontScale] || "1";
+    try { localStorage.setItem("ot_font_scale", fontScale); } catch(e){}
+  }, [fontScale]);
+
+  const FONT_SCALES = ["sm","md","lg"];
+  const FONT_LABELS = { sm:"소", md:"중", lg:"대" };
+  const cycleFontScale = ()=>{
+    setFontScale(prev=>{
+      const idx = FONT_SCALES.indexOf(prev);
+      return FONT_SCALES[(idx+1)%FONT_SCALES.length];
+    });
+  };
 
   const toastTimerRef = useRef(null);
   const toast = (msg)=>{
@@ -1897,11 +2035,22 @@ function App(){
   const selectPatient = (id)=>{ setSelectedPatientId(id); setScreen("list"); };
   const backToPatients = ()=>{ setScreen("patients"); setSelectedPatientId(null); };
 
-  const addPatient = ()=>{
-    const patient = { id: genPatientId(db.patients), label: genPatientLabel(), createdAt: Date.now() };
+  const [memoModalOpen, setMemoModalOpen] = useState(false);
+  const [memoModalMode, setMemoModalMode] = useState("new"); // new | edit
+
+  const createPatientWithMemo = (memo)=>{
+    const patient = { id: genPatientId(db.patients), label: genPatientLabel(), createdAt: Date.now(), memo };
     setDb(prev=>({...prev, patients:[...prev.patients, patient]}));
     setSelectedPatientId(patient.id);
     setScreen("list");
+    setMemoModalOpen(false);
+  };
+  const openAddPatient = ()=>{ setMemoModalMode("new"); setMemoModalOpen(true); };
+  const openEditMemo = ()=>{ setMemoModalMode("edit"); setMemoModalOpen(true); };
+  const saveEditedMemo = (memo)=>{
+    setDb(prev=>({...prev, patients: prev.patients.map(p=> p.id===selectedPatientId ? {...p, memo} : p)}));
+    toast("메모가 저장되었습니다");
+    setMemoModalOpen(false);
   };
 
   const doDeletePatient = (id)=>{
@@ -2012,12 +2161,16 @@ function App(){
             <span className="version-badge">v{APP_VERSION}</span>
           </div>
         )}
-        {screen==="patients" && db.patients.length>0 && (
-          <button className="icon-btn danger-text" onClick={requestDeleteAllPatients}>🗑 전체삭제</button>
-        )}
-        {screen==="list" && <button className="icon-btn" title="평가결과 모아보기" onClick={openCollect}>🗂️</button>}
-        {screen==="form" && <button className="icon-btn" onClick={cancelForm}>✕</button>}
-        {screen==="collect" && <button className="icon-btn" onClick={backToListFromCollect}>✕</button>}
+        <div style={{display:"flex", alignItems:"center", gap:4}}>
+          <button className="icon-btn font-scale-btn" title="글자 크기 조절" onClick={cycleFontScale}>가 {FONT_LABELS[fontScale]}</button>
+          {screen==="patients" && db.patients.length>0 && (
+            <button className="icon-btn danger-text" onClick={requestDeleteAllPatients}>🗑 전체삭제</button>
+          )}
+          {screen==="list" && <button className="icon-btn" title="환자 메모" onClick={openEditMemo}>📝</button>}
+          {screen==="list" && <button className="icon-btn" title="평가결과 모아보기" onClick={openCollect}>🗂️</button>}
+          {screen==="form" && <button className="icon-btn" onClick={cancelForm}>✕</button>}
+          {screen==="collect" && <button className="icon-btn" onClick={backToListFromCollect}>✕</button>}
+        </div>
       </div>
 
       {screen==="patients" && (
@@ -2025,7 +2178,7 @@ function App(){
           patients={db.patients}
           recordCounts={recordCounts}
           onSelect={selectPatient}
-          onAdd={addPatient}
+          onAdd={openAddPatient}
           onRequestDelete={requestDeletePatient}
         />
       )}
@@ -2074,6 +2227,15 @@ function App(){
           onSavePreset={handleSavePreset}
           onDeletePreset={handleDeletePreset}
           onClose={()=>setPickerOpen(false)}
+        />
+      )}
+
+      {memoModalOpen && (
+        <MemoModal
+          mode={memoModalMode}
+          initialValue={memoModalMode==="edit" ? (selectedPatient?.memo||"") : ""}
+          onCancel={()=> memoModalMode==="new" ? createPatientWithMemo("") : setMemoModalOpen(false)}
+          onConfirm={memoModalMode==="new" ? createPatientWithMemo : saveEditedMemo}
         />
       )}
     </React.Fragment>
